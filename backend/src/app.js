@@ -19,11 +19,12 @@ import airportRoutes   from './modules/airports/airport.routes.js'
 import navpointRoutes  from './modules/navpoints/navpoint.routes.js'
 import airwayRoutes    from './modules/navpoints/airway.routes.js'
 import performanceRoutes  from './modules/performance/performance.routes.js'
-// import computeRoutes     from './modules/compute/compute.routes.js'
-// import payloadRoutes     from './modules/payload/payload.routes.js'
+import computeRoutes   from './modules/compute/compute.routes.js'
+import weatherRoutes   from './modules/weather/weather.routes.js'
+import payloadRoutes   from './modules/payload/payload.routes.js'
+import chartRoutes     from './modules/charts/charts.routes.js'
 // import navlogRoutes      from './modules/navlog/navlog.routes.js'
 // import ofpRoutes         from './modules/ofp/ofp.routes.js'
-// import weatherRoutes     from './modules/weather/weather.routes.js'
 // import userRoutes        from './modules/users/user.routes.js'
 // import configRoutes      from './modules/config/config.routes.js'
 
@@ -31,7 +32,14 @@ const app = express()
 
 // ─── Core Middleware ──────────────────────────────────────────────
 app.use(helmet())
-app.use(cors({ origin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173', credentials: true }))
+app.use(cors({ 
+  origin: [
+    process.env.CLIENT_ORIGIN ?? 'http://localhost:5173',
+    process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+    'http://localhost:5174' // Allow alternate Vite port
+  ], 
+  credentials: true 
+}))
 app.use(compression())
 app.use(cookieParser())
 app.use(express.json())
@@ -56,6 +64,10 @@ app.use('/api/airports',  airportRoutes)
 app.use('/api/navpoints', navpointRoutes)
 app.use('/api/airways',      airwayRoutes)
 app.use('/api/performance', performanceRoutes)
+app.use('/api/compute',   computeRoutes)
+app.use('/api/weather',   weatherRoutes)
+app.use('/api/payload',   payloadRoutes)
+app.use('/api/charts',    chartRoutes)
 
 // ─── 404 + Error Handlers (always last) ──────────────────────────
 app.use(notFoundHandler)
@@ -268,3 +280,4 @@ export { app, httpServer }
 // // })
 
 // // export { app, httpServer }
+
