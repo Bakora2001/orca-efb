@@ -1,10 +1,15 @@
 import { Router } from 'express'
+import multer from 'multer'
 import * as controller from './navpoint.controller.js'
 import { validate } from '../../middleware/validate.js'
 import { authenticate, authorize } from '../../middleware/auth.js'
 import { createNavpointSchema, updateNavpointSchema, bulkImportSchema } from './navpoint.validation.js'
 
 const router = Router()
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+})
 
 router.use(authenticate)
 
@@ -51,6 +56,14 @@ router.post(
   authorize('admin'),
   validate(bulkImportSchema),
   controller.bulkImport
+)
+
+// POST /api/navpoints/import-enr  — import KCAA/ASECNA ENR 4.4 CSV
+router.post(
+  '/import-enr',
+  authorize('admin'),
+  upload.single('enr_csv'),
+  controller.importEnrCsv
 )
 
 export default router

@@ -1,7 +1,28 @@
-import * as payloadService from './payload.service.js'
+// payload.controller.js
+import { calculatePayload } from './payload.service.js'
 import asyncHandler from '../../utils/asyncHandler.js'
 
-export const compute = asyncHandler(async (req, res) => {
-  const result = await payloadService.computePayload(req.body)
-  res.json(result)
+export const payload = asyncHandler(async (req, res) => {
+  const {
+    aircraft_id, dep_id, dest_id, alt_id,
+    oat, flap, alt_dist_nm, extra_fuel_lb, reserve_min,
+  } = req.body
+
+  if (!aircraft_id || !dep_id || !dest_id || oat == null) {
+    return res.status(400).json({
+      success: false,
+      message: 'aircraft_id, dep_id, dest_id and oat are required',
+    })
+  }
+
+  const result = await calculatePayload({
+    aircraft_id, dep_id, dest_id, alt_id,
+    oat: parseFloat(oat),
+    flap: flap ?? 'auto',
+    alt_dist_nm:   parseFloat(alt_dist_nm  ?? 0),
+    extra_fuel_lb: parseFloat(extra_fuel_lb ?? 0),
+    reserve_min:   reserve_min != null ? parseFloat(reserve_min) : null,
+  })
+
+  res.json({ success: true, data: result })
 })

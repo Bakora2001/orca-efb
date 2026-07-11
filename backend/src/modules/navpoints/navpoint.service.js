@@ -240,6 +240,50 @@ export async function bulkImportNavpoints(points, { overwrite = false } = {}) {
   return { imported, skipped, errors }
 }
 
+// ─── Import ENR CSV (admin) ───────────────────────────────────────
+// Parses a KCAA/ASECNA ENR 4.4-style CSV with columns:
+// ident, name, point_type, lat, lon, elevation_ft, region, country_iso, provider, effective_date
+export async function importEnrCsv(csvText) {
+  const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0)
+  if (lines.length < 2) throw new AppError('CSV is empty or has no data rows', 400)
+
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
+  const required = ['ident', 'lat', 'lon']
+  for (const col of required) {
+    if (!headers.includes(col)) throw new AppError(`CSV missing required column: ${col}`, 400)
+  }
+
+  const points = []
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(',')
+    const row = {}
+    headers.forEach((h, idx) => { row[h] = (cells[idx] ?? '').trim() })
+
+    const ident = (row.ident || '').toUpperCase().trim()
+    const lat   = parseFloat(row.lat)
+    const lon   = parseFloat(row.lon)
+    if (!ident || isNaN(lat) || isNaN(lon)) continue
+
+    points.push({
+      ident,
+      name:           row.name || ident,
+      point_type:     (row.point_type || 'WAYPOINT').toUpperCase(),
+      lat,
+      lon,
+      elevation_ft:   row.elevation_ft ? parseFloat(row.elevation_ft) : null,
+      region:         row.region || null,
+      country_iso:    row.country_iso || null,
+      provider:       row.provider || null,
+      effective_date: row.effective_date || null,
+      source:         'ENR_CSV',
+    })
+  }
+
+  if (points.length === 0) throw new AppError('No valid rows found in CSV', 400)
+
+  return bulkImportNavpoints(points, { overwrite: false })
+}
+
 // ─── Great-circle math helpers ────────────────────────────────────
 const R_NM = 3440.065  // Earth radius in nautical miles
 

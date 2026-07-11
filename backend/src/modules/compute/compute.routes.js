@@ -4,6 +4,7 @@ import { authenticate } from '../../middleware/auth.js'
 
 const router = Router()
 
+// All compute routes require authentication
 router.use(authenticate)
 
 // POST /api/compute

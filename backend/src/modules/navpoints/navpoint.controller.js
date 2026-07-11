@@ -1,5 +1,6 @@
 import * as navpointService from './navpoint.service.js'
 import asyncHandler from '../../utils/asyncHandler.js'
+import AppError from '../../utils/AppError.js'
 
 export const getAll = asyncHandler(async (req, res) => {
   const navpoints = await navpointService.getAllNavpoints()
@@ -56,5 +57,12 @@ export const bulkImport = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, message: 'points must be a non-empty array' })
   }
   const result = await navpointService.bulkImportNavpoints(points, { overwrite: overwrite === true })
+  res.json({ success: true, data: result })
+})
+
+export const importEnrCsv = asyncHandler(async (req, res) => {
+  if (!req.file) throw new AppError('CSV file is required', 400)
+  const csvText = req.file.buffer.toString('utf-8')
+  const result = await navpointService.importEnrCsv(csvText)
   res.json({ success: true, data: result })
 })
