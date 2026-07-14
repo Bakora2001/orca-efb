@@ -1,9 +1,15 @@
 import * as airportService from './airport.service.js'
 import asyncHandler from '../../utils/asyncHandler.js'
 
+const mapAirport = (a) => ({
+  ...a,
+  icao: a.icao_code,
+  iata: a.iata_code
+})
+
 export const getAll = asyncHandler(async (req, res) => {
   const airports = await airportService.getAllAirports()
-  res.json({ success: true, data: airports })
+  res.json({ success: true, data: airports.map(mapAirport) })
 })
 
 export const search = asyncHandler(async (req, res) => {
@@ -11,12 +17,12 @@ export const search = asyncHandler(async (req, res) => {
   // The mockup expects a plain array (not wrapped), so we return directly
   // to match: const r = await fetch('/api/airports/search?q=...')
   //           const aps = await r.json()  <-- used as array
-  res.json(results)
+  res.json(results.map(mapAirport))
 })
 
 export const getOne = asyncHandler(async (req, res) => {
   const airport = await airportService.getAirportById(req.params.id)
-  res.json({ success: true, data: airport })
+  res.json({ success: true, data: mapAirport(airport) })
 })
 
 export const create = asyncHandler(async (req, res) => {
