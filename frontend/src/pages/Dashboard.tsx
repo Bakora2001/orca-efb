@@ -1,351 +1,294 @@
+import { useState, useEffect } from 'react'
 import {
-  Calendar, Plane, Clock, FileText, CloudRain, Target, AlertTriangle, Sparkles, CheckCircle
+  PlaneTakeoff, CloudLightning, ShieldCheck,
+  AlertTriangle, Navigation, Clock, ChevronRight, Loader2,
+  Activity, WifiOff, RefreshCw
 } from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import Card from '../components/ui/Card'
+import { Link, useNavigate } from 'react-router-dom'
+import { aircraft as aircraftApi, weather as weatherApi, health as healthApi, type WeatherResult } from '../lib/api'
+import { useAuth } from '../lib/AuthContext'
 
-const statCards = [
-  { label: 'Flights Planned Today', value: '24', sub: '↑ 15% vs yesterday', icon: Calendar, color: 'text-primary' },
-  { label: 'Aircraft Online', value: '8', sub: 'View Fleet', icon: Plane, color: 'text-primary' },
-  { label: 'Pending Dispatches', value: '12', sub: 'View All', icon: Clock, color: 'text-warning' },
-  { label: 'Generated OFPs', value: '31', sub: 'Today', icon: FileText, color: 'text-primary' },
-  { label: 'Weather Alerts', value: '3', sub: 'View Alerts', icon: CloudRain, color: 'text-danger' },
-  { label: 'Dispatch Accuracy', value: '99.8%', sub: 'This Month', icon: Target, color: 'text-success' },
-]
-
-const dispatches = [
-  { tail: '5Y-DWN', route: 'EGPD → UNAA', time: '20:31 UTC', status: 'APPROVED' },
-  { tail: '5Y-DWO', route: 'KABI → KABR', time: '19:45 UTC', status: 'APPROVED' },
-  { tail: '5Y-DWP', route: 'CTCA → BGAA', time: '18:22 UTC', status: 'MARGINAL' },
-  { tail: '5Y-DWN', route: 'HKJK → VGHS', time: '17:10 UTC', status: 'APPROVED' },
-  { tail: '5Y-DWO', route: 'OIAA → OMDW', time: '16:05 UTC', status: 'APPROVED' },
-]
-
-const upcoming = [
-  { flight: 'KABI', route: 'KABI → HADR', time: '00:45', aircraft: '5Y-DWN', status: 'Planned' },
-  { flight: 'HADR', route: 'HADR → KABR', time: '04:30', aircraft: '5Y-DWO', status: 'Planned' },
-  { flight: 'EGPD', route: 'EGPD → UNAA', time: '06:15', aircraft: '5Y-DWP', status: 'Planned' },
-  { flight: 'HKJK', route: 'HKJK → VGHS', time: '08:00', aircraft: '5Y-DWN', status: 'Planned' },
-  { flight: 'CTCA', route: 'CTCA → BGAA', time: '10:30', aircraft: '5Y-DWO', status: 'Planned' },
-]
-
-const fuelData = [
-  { time: '00-04', planned: 35, burn: 20 },
-  { time: '04-08', planned: 50, burn: 30 },
-  { time: '08-12', planned: 38, burn: 28 },
-  { time: '12-16', planned: 30, burn: 22 },
-  { time: '16-20', planned: 42, burn: 26 },
-  { time: '20-24', planned: 33, burn: 20 },
-]
-
-function statusColor(status: string) {
-  if (status === 'APPROVED') return 'text-success bg-success/10'
-  if (status === 'MARGINAL') return 'text-warning bg-warning/10'
-  return 'text-danger bg-danger/10'
-}
-
-export default function Dashboard() {
+// ── Small weather detail chip ──────────────────────────────────────────────────
+function MetarToken({ label, value }: { label: string; value: string }) {
   return (
-    <div className="space-y-4 lg:space-y-6">
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 lg:gap-4">
-        {statCards.map((c) => (
-          <div key={c.label} className="bg-surface rounded-xl border border-border shadow-card p-4">
-            <c.icon size={18} className={c.color} />
-            <p className="text-2xl font-bold text-text-primary mt-2">{c.value}</p>
-            <p className="text-xs text-text-secondary mt-1">{c.label}</p>
-            <p className={`text-xs font-medium mt-1 ${c.label.includes('Weather') ? 'text-danger' : 'text-text-secondary'}`}>{c.sub}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-        {/* Map */}
-        <div className="lg:col-span-2 bg-primary-darker rounded-xl border border-border shadow-card p-4 relative overflow-hidden min-h-[320px]">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <h3 className="text-white font-semibold text-sm">Live Operations Map</h3>
-              <span className="flex items-center gap-1 text-xs text-success bg-white/10 px-2 py-0.5 rounded-full">
-                <span className="w-1.5 h-1.5 bg-success rounded-full" /> Live
-              </span>
-            </div>
-          </div>
-          <div className="absolute inset-0 mt-12 opacity-40 bg-[radial-gradient(circle_at_30%_30%,rgba(30,94,255,0.4),transparent_60%)]" />
-          <div className="relative h-64 flex items-center justify-center text-blue-300 text-sm">
-            World map visualization (live flights, weather overlays, NOTAMs)
-          </div>
-        </div>
-
-        {/* Recent Dispatches + Weather Summary */}
-        <div className="flex flex-col gap-4 lg:gap-6">
-          <div className="bg-surface rounded-xl border border-border shadow-card p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-text-primary text-sm">Recent Dispatches</h3>
-              <span className="text-xs text-primary font-medium cursor-pointer">View All</span>
-            </div>
-            <div className="space-y-2">
-              {dispatches.map((d, i) => (
-                <div key={i} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0">
-                  <div>
-                    <p className="font-medium text-text-primary">{d.tail}</p>
-                    <p className="text-xs text-text-secondary">{d.route}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-text-secondary">{d.time}</p>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusColor(d.status)}`}>{d.status}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-surface rounded-xl border border-border shadow-card p-4">
-            <h3 className="font-semibold text-text-primary text-sm mb-3">Weather Summary (EGPD)</h3>
-            <div className="flex items-center gap-3 mb-3">
-              <CloudRain size={28} className="text-warning" />
-              <div>
-                <p className="text-2xl font-bold text-text-primary">30°C</p>
-                <p className="text-xs text-text-secondary">OAT</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <p className="text-text-secondary">Wind</p>
-                <p className="font-semibold text-text-primary">220°/12 kt</p>
-              </div>
-              <div>
-                <p className="text-text-secondary">QNH</p>
-                <p className="font-semibold text-text-primary">1013 hPa</p>
-              </div>
-              <div>
-                <p className="text-text-secondary">Visibility</p>
-                <p className="font-semibold text-text-primary">10 km</p>
-              </div>
-              <div>
-                <p className="text-text-secondary">Clouds</p>
-                <p className="font-semibold text-text-primary">SCT 3,000 ft</p>
-              </div>
-            </div>
-            <p className="text-xs text-primary font-medium mt-3 cursor-pointer">View Full Weather</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-        {/* Today's overview */}
-        <div className="bg-surface rounded-xl border border-border shadow-card p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-text-primary text-sm">Today's Overview</h3>
-            <span className="text-xs text-primary font-medium cursor-pointer">View Full Report</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="relative w-24 h-24 shrink-0">
-              <svg viewBox="0 0 36 36" className="w-24 h-24 -rotate-90">
-                <circle cx="18" cy="18" r="16" fill="none" stroke="#E5EAF3" strokeWidth="4" />
-                <circle cx="18" cy="18" r="16" fill="none" stroke="#22C55E" strokeWidth="4" strokeDasharray="62.5 100" pathLength="100" />
-                <circle cx="18" cy="18" r="16" fill="none" stroke="#F59E0B" strokeWidth="4" strokeDasharray="20.8 100" strokeDashoffset="-62.5" pathLength="100" />
-                <circle cx="18" cy="18" r="16" fill="none" stroke="#EF4444" strokeWidth="4" strokeDasharray="8.3 100" strokeDashoffset="-83.3" pathLength="100" />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <p className="text-lg font-bold text-text-primary">24</p>
-                <p className="text-[10px] text-text-secondary">Total</p>
-              </div>
-            </div>
-            <div className="text-xs space-y-1.5">
-              <p className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-success" /> Approved <span className="ml-auto font-medium">15 (62.5%)</span></p>
-              <p className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-warning" /> Marginal <span className="ml-auto font-medium">5 (20.8%)</span></p>
-              <p className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-danger" /> Rejected <span className="ml-auto font-medium">2 (8.3%)</span></p>
-              <p className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-200" /> Pending <span className="ml-auto font-medium">2 (8.3%)</span></p>
-            </div>
-          </div>
-        </div>
-
-        {/* Upcoming flights */}
-        <div className="bg-surface rounded-xl border border-border shadow-card p-4 overflow-x-auto">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-text-primary text-sm">Upcoming Flights</h3>
-            <span className="text-xs text-primary font-medium cursor-pointer">View All</span>
-          </div>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-text-secondary text-left">
-                <th className="pb-2 font-medium">Flight</th>
-                <th className="pb-2 font-medium">Route</th>
-                <th className="pb-2 font-medium">STD</th>
-                <th className="pb-2 font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {upcoming.map((u, i) => (
-                <tr key={i} className="border-t border-border">
-                  <td className="py-2 font-medium text-text-primary">{u.flight}</td>
-                  <td className="py-2 text-text-secondary">{u.route}</td>
-                  <td className="py-2 text-text-secondary">{u.time}</td>
-                  <td className="py-2"><span className="bg-primary/10 text-primary px-2 py-0.5 rounded-full text-[10px] font-medium">{u.status}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Fuel summary */}
-        <div className="bg-surface rounded-xl border border-border shadow-card p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-text-primary text-sm">Fuel Summary (Today)</h3>
-            <span className="text-xs text-primary font-medium cursor-pointer">View All</span>
-          </div>
-          <p className="text-xl font-bold text-text-primary">83,833 lb</p>
-          <p className="text-xs text-text-secondary mb-3">Total Fuel Planned</p>
-          <div style={{ width: '100%', height: 90 }}>
-            <ResponsiveContainer>
-              <BarChart data={fuelData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5EAF3" />
-                <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#64748B' }} axisLine={false} tickLine={false} />
-                <YAxis hide />
-                <Tooltip />
-                <Bar dataKey="planned" fill="#BFD3FF" radius={[3,3,0,0]} />
-                <Bar dataKey="burn" fill="#1E5EFF" radius={[3,3,0,0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-        <div className="bg-warning/10 border border-warning/30 rounded-xl p-4 flex items-start gap-3">
-          <AlertTriangle size={18} className="text-warning mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-text-primary">High temperature alert for OIAA (35°C)</p>
-            <p className="text-xs text-text-secondary">Consider performance impact for departures. · 10 min ago</p>
-          </div>
-        </div>
-
-        <div className="bg-surface rounded-xl border border-border shadow-card p-4">
-          <h3 className="font-semibold text-text-primary text-sm mb-3">Platform Status</h3>
-          <div className="space-y-2 text-sm">
-            {['Performance Engine', 'Weather Service', 'Navigation Data', 'Database'].map((s) => (
-              <div key={s} className="flex items-center justify-between">
-                <span className="text-text-secondary">{s}</span>
-                <span className="flex items-center gap-1 text-success font-medium text-xs">
-                  <CheckCircle size={14} /> Operational
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-primary-darker to-primary rounded-xl p-4 text-white flex flex-col">
-          <div className="flex items-center gap-2 mb-1">
-            <Sparkles size={16} />
-            <p className="text-sm font-semibold">AI Dispatch Assistant</p>
-            <span className="ml-auto text-[10px] bg-white/20 px-2 py-0.5 rounded-full">New</span>
-          </div>
-          <p className="text-xs text-blue-100 mb-3">Ask AI for quick dispatch recommendations and analysis</p>
-          <button className="mt-auto bg-white text-primary text-sm font-semibold py-2 rounded-lg">Open Assistant</button>
-        </div>
-      </div>
+    <div className="flex flex-col items-center bg-slate-50 border border-borderc rounded-lg px-3 py-2 min-w-[70px]">
+      <span className="text-[9px] font-bold text-textsecondary uppercase tracking-wider mb-0.5">{label}</span>
+      <span className="font-mono font-bold text-textprimary text-xs">{value}</span>
     </div>
   )
 }
 
+// ── Parse a few key fields from a raw METAR string ─────────────────────────────
+function parseMetar(raw: string) {
+  const wind  = raw.match(/(\d{3}|VRB)(\d{2,3})(G\d{2,3})?KT/)
+  const vis   = raw.match(/\s(\d{4}|CAVOK|[0-9]+SM)\s/)
+  const cloud = raw.match(/(FEW|SCT|BKN|OVC)\d{3}|CAVOK/)
+  const temp  = raw.match(/\s(M?\d{2})\/(M?\d{2})\s/)
+  const qnh   = raw.match(/[AQ](\d{4})/)
 
+  const windStr = wind
+    ? `${wind[1]}°/${wind[2]}${wind[3] ? ' G' + wind[3].slice(1) : ''} kt`
+    : '—'
+  const visStr  = vis ? vis[1] : cloud?.[0] === 'CAVOK' ? 'CAVOK' : '—'
+  const cloudStr = cloud ? cloud[0] : '—'
+  const tempStr = temp ? temp[1].replace('M', '-') + '°C' : '—'
+  const qnhStr  = qnh ? (raw.includes('Q') ? qnh[1] + ' hPa' : (parseInt(qnh[1]) / 100).toFixed(2) + ' inHg') : '—'
 
-// import { CalendarCheck, Plane, Clock3, FileText, Target, CloudLightning, Scale, Fuel } from 'lucide-react'
-// import Card from '../components/ui/Card'
-// import StatCard from '../components/ui/StatCard'
-// import StatusBadge from '../components/ui/StatusBadge'
-// import { mockDispatches } from '../data/mockData'
+  return { windStr, visStr, cloudStr, tempStr, qnhStr }
+}
 
-// export default function Dashboard() {
-//   return (
-//     <div className="space-y-6">
-//       <div>
-//         <h1 className="text-2xl font-bold text-textprimary">Dashboard</h1>
-//         <p className="text-textsecondary text-sm mt-1">Real-time operational overview — Thursday, 25 June 2026</p>
-//       </div>
+export default function Dashboard() {
+  const { user } = useAuth()
+  const navigate = useNavigate()
 
-//       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-//         <StatCard label="Flights Planned Today" value="42" icon={<CalendarCheck size={19} />} trend="+8% vs yesterday" trendUp accent="primary" />
-//         <StatCard label="Aircraft Online" value="8 / 10" icon={<Plane size={19} />} trend="2 in maintenance" accent="success" />
-//         <StatCard label="Pending Dispatches" value="6" icon={<Clock3 size={19} />} trend="3 marginal" accent="warning" />
-//         <StatCard label="Generated OFPs" value="38" icon={<FileText size={19} />} trend="+12% vs yesterday" trendUp accent="primary" />
-//       </div>
+  const [fleetCount,  setFleetCount]  = useState<number | null>(null)
+  const [activeCount, setActiveCount] = useState<number | null>(null)
+  const [weather,     setWeather]     = useState<WeatherResult | null>(null)
+  const [wxError,     setWxError]     = useState(false)
+  const [systemHealth, setSystemHealth] = useState<{ api: string; database: string } | null>(null)
+  const [healthChecked, setHealthChecked] = useState(false)
+  const [loading, setLoading] = useState(true)
 
-//       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-//         <StatCard label="Dispatch Accuracy" value="99.8%" icon={<Target size={19} />} accent="success" />
-//         <StatCard label="Weather Alerts" value="2" icon={<CloudLightning size={19} />} accent="danger" />
-//         <StatCard label="Average Payload" value="6,420 kg" icon={<Scale size={19} />} accent="primary" />
-//         <StatCard label="Average Fuel Burn" value="1,180 kg/hr" icon={<Fuel size={19} />} accent="primary" />
-//       </div>
+  useEffect(() => {
+    async function load() {
+      // Fetch all in parallel, each with individual error handling so one
+      // failing request doesn't prevent the others from rendering.
+      const [acResult, wxResult, hlResult] = await Promise.allSettled([
+        aircraftApi.list(true),
+        weatherApi.get('EGPD'),
+        healthApi.check(),
+      ])
 
-//       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-//         <Card className="lg:col-span-2">
-//           <div className="flex items-center justify-between mb-4">
-//             <h2 className="font-bold text-textprimary">Recent Dispatches</h2>
-//             <a href="/dispatch-center" className="text-xs font-semibold text-primary hover:underline">View all</a>
-//           </div>
-//           <div className="overflow-x-auto -mx-5">
-//             <table className="w-full text-sm min-w-[600px]">
-//               <thead>
-//                 <tr className="text-left text-textsecondary text-xs border-b border-borderc">
-//                   <th className="px-5 py-2 font-medium">ID</th>
-//                   <th className="px-5 py-2 font-medium">Aircraft</th>
-//                   <th className="px-5 py-2 font-medium">Route</th>
-//                   <th className="px-5 py-2 font-medium">RTOW</th>
-//                   <th className="px-5 py-2 font-medium">Status</th>
-//                 </tr>
-//               </thead>
-//               <tbody>
-//                 {mockDispatches.map((d) => (
-//                   <tr key={d.id} className="border-b border-borderc last:border-0 hover:bg-slate-50/60">
-//                     <td className="px-5 py-3 font-semibold text-textprimary">{d.id}</td>
-//                     <td className="px-5 py-3 text-textprimary">{d.aircraft}</td>
-//                     <td className="px-5 py-3 text-textsecondary">{d.departure} → {d.destination}</td>
-//                     <td className="px-5 py-3 text-textprimary mono">{d.rtow.toLocaleString()} kg</td>
-//                     <td className="px-5 py-3"><StatusBadge status={d.status} /></td>
-//                   </tr>
-//                 ))}
-//               </tbody>
-//             </table>
-//           </div>
-//         </Card>
+      if (acResult.status === 'fulfilled') {
+        setFleetCount(acResult.value.length)
+        setActiveCount(acResult.value.filter(a => a.is_active).length)
+      } else {
+        setFleetCount(0)
+        setActiveCount(0)
+        console.error('Fleet fetch failed:', acResult.reason)
+      }
 
-//         <Card>
-//           <h2 className="font-bold text-textprimary mb-4">Recent Weather Alerts</h2>
-//           <div className="space-y-3">
-//             <AlertRow airport="EGPD" message="Crosswind exceeding limits on RWY 16" level="warning" />
-//             <AlertRow airport="HKJK" message="Visibility below CAT I minimums" level="danger" />
-//             <AlertRow airport="FTTC" message="Light turbulence reported FL180-FL250" level="warning" />
-//           </div>
-//           <h2 className="font-bold text-textprimary mb-3 mt-6">Recent OFPs</h2>
-//           <div className="space-y-2 text-sm">
-//             <OfpRow id="OFP-3381" route="EGPD → FTTC" />
-//             <OfpRow id="OFP-3380" route="HKJK → HKMO" />
-//             <OfpRow id="OFP-3379" route="HKMO → HKJK" />
-//           </div>
-//         </Card>
-//       </div>
-//     </div>
-//   )
-// }
+      if (wxResult.status === 'fulfilled' && wxResult.value) {
+        setWeather(wxResult.value)
+        setWxError(false)
+      } else {
+        setWxError(true)
+      }
 
-// function AlertRow({ airport, message, level }: { airport: string; message: string; level: 'warning' | 'danger' }) {
-//   const color = level === 'danger' ? 'bg-danger' : 'bg-warning'
-//   return (
-//     <div className="flex items-start gap-2.5">
-//       <span className={`w-2 h-2 rounded-full mt-1.5 ${color}`} />
-//       <div>
-//         <p className="text-sm font-semibold text-textprimary">{airport}</p>
-//         <p className="text-xs text-textsecondary">{message}</p>
-//       </div>
-//     </div>
-//   )
-// }
+      if (hlResult.status === 'fulfilled' && hlResult.value) {
+        setSystemHealth(hlResult.value)
+      }
+      setHealthChecked(true)
+      setLoading(false)
+    }
+    load()
+  }, [])
 
-// function OfpRow({ id, route }: { id: string; route: string }) {
-//   return (
-//     <div className="flex items-center justify-between text-textprimary">
-//       <span className="font-medium">{id}</span>
-//       <span className="text-textsecondary text-xs">{route}</span>
-//     </div>
-//   )
-// }
+  // Health: backend returns api:'OK' (uppercase)
+  const isHealthy = healthChecked && systemHealth
+    ? systemHealth.api?.toUpperCase() === 'OK' && systemHealth.database?.toUpperCase() === 'OK'
+    : false
+
+  const StatCard = ({
+    icon: Icon, label, value, sub, color, to
+  }: { icon: React.ElementType; label: string; value: string | number | null; sub?: string; color: string; to: string }) => (
+    <div
+      className="bg-white rounded-xl border border-borderc shadow-card p-5 flex flex-col justify-between cursor-pointer group hover:border-primary hover:shadow-md transition duration-200"
+      onClick={() => navigate(to)}
+    >
+      <div className="flex justify-between items-start mb-4">
+        <div className={`p-2.5 rounded-xl ${color}`}>
+          <Icon size={22} />
+        </div>
+        <ChevronRight size={18} className="text-borderc group-hover:text-primary transition transform group-hover:translate-x-1" />
+      </div>
+      <div>
+        <p className="text-3xl font-black text-textprimary mb-1">
+          {value === null
+            ? <Loader2 size={24} className="animate-spin text-borderc my-1" />
+            : value}
+        </p>
+        <p className="text-sm font-bold text-textsecondary">{label}</p>
+        {sub && <p className="text-xs text-textsecondary mt-1 font-medium">{sub}</p>}
+      </div>
+    </div>
+  )
+
+  const parsed = weather ? parseMetar(weather.metar) : null
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── Welcome Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
+        <div>
+          <h1 className="text-2xl font-bold text-textprimary tracking-tight">
+            {user?.full_name ? `Welcome, ${user.full_name.split(' ')[0]}` : 'Overview'}
+          </h1>
+          <p className="text-textsecondary text-sm mt-0.5">Operational summary and system status</p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {!healthChecked ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border bg-slate-50 text-slate-500 border-slate-200">
+              <Loader2 size={12} className="animate-spin" /> Checking Systems
+            </div>
+          ) : systemHealth ? (
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border ${isHealthy ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+              <span className={`w-2 h-2 rounded-full ${isHealthy ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+              {isHealthy ? 'All Systems Operational' : 'System Degraded'}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border bg-amber-50 text-amber-700 border-amber-200">
+              <WifiOff size={12} /> Backend Offline
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Top Stats Grid ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          icon={PlaneTakeoff}
+          label="Active Fleet"
+          value={activeCount}
+          sub={fleetCount !== null && activeCount !== null ? `${fleetCount - activeCount} in maintenance` : undefined}
+          color="bg-primary/10 text-primary"
+          to="/fleet"
+        />
+        <StatCard
+          icon={Navigation}
+          label="Active Flights"
+          value="0"
+          sub="0 pending dispatch"
+          color="bg-indigo-50 text-indigo-600"
+          to="/dispatch-center"
+        />
+        <StatCard
+          icon={AlertTriangle}
+          label="NOTAMs"
+          value="0"
+          sub="No active alerts"
+          color="bg-amber-50 text-amber-600"
+          to="/airports"
+        />
+        <StatCard
+          icon={ShieldCheck}
+          label="Safety Index"
+          value="100%"
+          sub="Within limits"
+          color="bg-emerald-50 text-emerald-600"
+          to="/performance"
+        />
+      </div>
+
+      {/* ── Bottom Row ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* ── Weather Widget (spans 2 cols) ── */}
+        <div className="lg:col-span-2">
+          <Card className="h-full flex flex-col p-5">
+            <div className="flex items-center justify-between mb-5 border-b border-borderc pb-3">
+              <h2 className="text-sm font-bold text-textprimary flex items-center gap-2">
+                <CloudLightning size={16} className="text-primary" />
+                Base Weather (EGPD)
+              </h2>
+              <Link to="/weather" className="text-xs font-bold text-primary hover:underline flex items-center gap-1">
+                View Full Wx <ChevronRight size={12} />
+              </Link>
+            </div>
+
+            <div className="flex-1">
+              {loading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 size={24} className="text-primary animate-spin" />
+                </div>
+              ) : weather && !wxError ? (
+                <div className="space-y-4">
+                  {/* Raw METAR string */}
+                  <p className="text-xs font-mono text-slate-600 bg-slate-50 p-3 rounded-xl border border-borderc break-all leading-relaxed">
+                    {weather.metar}
+                  </p>
+
+                  {/* Parsed key values */}
+                  {parsed && (
+                    <div className="flex flex-wrap gap-2">
+                      <MetarToken label="Wind"  value={parsed.windStr}  />
+                      <MetarToken label="Vis"   value={parsed.visStr}   />
+                      <MetarToken label="Cloud" value={parsed.cloudStr} />
+                      <MetarToken label="Temp"  value={parsed.tempStr}  />
+                      <MetarToken label="QNH"   value={parsed.qnhStr}   />
+                    </div>
+                  )}
+
+                  {/* TAF if available */}
+                  {weather.taf && (
+                    <div>
+                      <p className="text-[9px] font-bold text-textsecondary uppercase tracking-wider mb-1.5">TAF</p>
+                      <p className="text-[10px] font-mono text-textsecondary bg-slate-50 p-3 rounded-xl border border-borderc break-all leading-relaxed line-clamp-4">
+                        {weather.taf}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-10 gap-3">
+                  <WifiOff size={28} className="text-slate-300" />
+                  <p className="text-sm text-textsecondary font-medium">METAR for EGPD unavailable</p>
+                  <button
+                    onClick={() => {
+                      setWxError(false)
+                      setWeather(null)
+                      setLoading(true)
+                      weatherApi.get('EGPD')
+                        .then(wx => { setWeather(wx); setLoading(false) })
+                        .catch(() => { setWxError(true); setLoading(false) })
+                    }}
+                    className="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline"
+                  >
+                    <RefreshCw size={12} /> Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+
+        {/* ── Activity Feed ── */}
+        <div>
+          <Card className="h-full flex flex-col p-5">
+            <div className="flex items-center justify-between mb-5 border-b border-borderc pb-3">
+              <h2 className="text-sm font-bold text-textprimary flex items-center gap-2">
+                <Activity size={16} className="text-primary" />
+                Recent Activity
+              </h2>
+              <span className="text-[9px] font-bold text-textsecondary uppercase tracking-wider px-2 py-0.5 bg-slate-100 rounded-full">
+                Live
+              </span>
+            </div>
+
+            {/* Empty state — no hardcoded dummy data */}
+            <div className="flex-1 flex flex-col items-center justify-center py-6 text-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
+                <Clock size={18} className="text-slate-400" />
+              </div>
+              <p className="text-sm font-semibold text-textsecondary">No recent activity</p>
+              <p className="text-xs text-slate-400 leading-relaxed max-w-[180px]">
+                Flight operations and system events will appear here as they occur.
+              </p>
+            </div>
+
+            <button
+              onClick={() => navigate('/reports')}
+              className="w-full mt-4 py-2 text-xs font-bold text-textsecondary hover:text-primary transition bg-slate-50 hover:bg-slate-100 rounded-lg"
+            >
+              View All Logs
+            </button>
+          </Card>
+        </div>
+
+      </div>
+    </div>
+  )
+}

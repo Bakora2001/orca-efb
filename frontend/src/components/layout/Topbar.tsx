@@ -1,12 +1,30 @@
-import { Search, Bell, Menu, ChevronDown, LogOut } from 'lucide-react'
+import { Search, Bell, Menu, ChevronDown, LogOut, User } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useUTCClock } from '../ui/useUTCClock'
+import { logout } from '../../lib/api'
+import { useAuth } from '../../lib/AuthContext'
 
 export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const { timeString } = useUTCClock()
   const [profileOpen, setProfileOpen] = useState(false)
   const navigate = useNavigate()
+  const { user, onLogout } = useAuth()
+
+  const displayName = user?.full_name || user?.username || 'User'
+  const initials = displayName
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+  const roleLabel = user?.role === 'admin' ? 'Administrator' : 'Dispatcher'
+
+  const handleLogout = () => {
+    setProfileOpen(false)
+    onLogout()   // clears context state
+    logout()     // tells server to clear cookie, then redirects to /login
+  }
 
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-borderc px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
@@ -41,23 +59,27 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
             className="flex items-center gap-2 pl-2 border-l border-borderc"
           >
             <div className="w-8 h-8 rounded-full bg-primary-dark text-white flex items-center justify-center text-xs font-bold">
-              JD
+              {initials || <User size={14} />}
             </div>
             <div className="hidden md:block text-left">
-              <p className="text-xs font-semibold text-textprimary leading-tight">J. Dispatcher</p>
-              <p className="text-[11px] text-textsecondary leading-tight">Dispatcher</p>
+              <p className="text-xs font-semibold text-textprimary leading-tight">{displayName}</p>
+              <p className="text-[11px] text-textsecondary leading-tight">{roleLabel}</p>
             </div>
             <ChevronDown size={15} className="text-textsecondary hidden md:block" />
           </button>
 
           {profileOpen && (
-            <div className="absolute right-0 mt-2 w-44 bg-white border border-borderc rounded-lg shadow-cardHover py-1.5 z-50">
+            <div className="absolute right-0 mt-2 w-48 bg-white border border-borderc rounded-lg shadow-cardHover py-1.5 z-50">
+              <div className="px-3.5 py-2 border-b border-borderc mb-1">
+                <p className="text-xs font-semibold text-textprimary">{displayName}</p>
+                <p className="text-[11px] text-textsecondary">{roleLabel}</p>
+              </div>
               <button
-                onClick={() => navigate('/')}
-                className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-danger hover:bg-slate-50 transition"
+                onClick={handleLogout}
+                className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-danger hover:bg-red-50 transition"
               >
                 <LogOut size={15} />
-                Logout
+                Sign Out
               </button>
             </div>
           )}

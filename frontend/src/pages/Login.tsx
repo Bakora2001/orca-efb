@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, Mail, Lock, User, Shield, ArrowRight, MapPin, Plane, ShieldCheck, Database } from 'lucide-react'
+import { auth } from '../lib/api'
+import { useAuth } from '../lib/AuthContext'
 
 /* ── Looping typewriter hook ── */
 const PAIRS = [
@@ -106,6 +108,7 @@ function BgRoutes() {
 /* ════ Main Login Component ════ */
 export default function Login() {
   const navigate = useNavigate()
+  const { onLogin } = useAuth()
   const [showPw, setShowPw] = useState(false)
   const [role, setRole] = useState<'dispatcher' | 'administrator'>('dispatcher')
   const [remember, setRemember] = useState(false)
@@ -130,46 +133,42 @@ export default function Login() {
     setFieldErrors({})
     setIsLoading(true)
 
-    const endpoint = isSignUp ? 'http://localhost:4000/api/auth/register' : 'http://localhost:4000/api/auth/login'
     const backendRole = role === 'administrator' ? 'admin' : 'dispatcher'
-    const payload = isSignUp ? { username, password, role: backendRole } : { username, password }
 
     try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-      const data = await res.json()
+      let data: { token?: string; user?: any }
 
-      if (!res.ok) {
-        // Parse Zod field-level errors if present
-        if (data.errors && Array.isArray(data.errors)) {
-          const fe: Record<string, string> = {}
-          data.errors.forEach((err: any) => {
-            if (err.path && err.path[0]) fe[err.path[0]] = err.message
-          })
-          setFieldErrors(fe)
-          setError('Please fix the errors below and try again.')
-        } else {
-          // Map common status codes to friendly messages
-          const msg = data.message || data.error || 'Something went wrong'
-          if (res.status === 401) setError('Incorrect username or password. Please try again.')
-          else if (res.status === 403) setError('Your account is deactivated. Contact an administrator.')
-          else if (res.status === 409) setError('That username is already taken. Please choose another.')
-          else setError(msg)
-        }
+      if (isSignUp) {
+        const result = await auth.register({ username, password, role: backendRole })
+        // Register doesn't return a token — log in immediately after
+        const loginResult = await auth.login({ username, password })
+        data = loginResult
+      } else {
+        data = await auth.login({ username, password })
+      }
+
+      if (data.token && data.user) {
+        onLogin(data.token, data.user)
+        navigate('/dashboard')
+      }
+    } catch (err: any) {
+      const msg: string = err.message || ''
+
+      // Genuine connectivity failure — fetch throws TypeError with no response
+      if (err.name === 'TypeError' && (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Load failed'))) {
+        setError('Cannot reach the server. Make sure the backend is running on port 4000.')
         return
       }
 
-      localStorage.setItem('token', data.token)
-      localStorage.setItem('user', JSON.stringify(data.user))
-      navigate('/dashboard')
-    } catch (err: any) {
-      if (err.name === 'TypeError' && err.message.includes('fetch')) {
-        setError('Cannot reach the server. Make sure the backend is running on port 4000.')
+      // Map status-code messages from the api client
+      if (msg.includes('401') || msg.toLowerCase().includes('invalid username') || msg.toLowerCase().includes('invalid password')) {
+        setError('Incorrect username or password. Please try again.')
+      } else if (msg.includes('403') || msg.toLowerCase().includes('deactivated')) {
+        setError('Your account is deactivated. Contact an administrator.')
+      } else if (msg.includes('409') || msg.toLowerCase().includes('already taken')) {
+        setError('That username is already taken. Please choose another.')
       } else {
-        setError(err.message || 'An unexpected error occurred.')
+        setError(msg || 'An unexpected error occurred.')
       }
     } finally {
       setIsLoading(false)
