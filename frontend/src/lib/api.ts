@@ -8,7 +8,7 @@
  *   • On failed refresh (cookie expired / revoked), clears state and redirects to /login
  */
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000'
+export const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000'
 
 // ─── In-memory token store ────────────────────────────────────────────────────
 // Stored as a module-level variable. Not accessible from outside this module.
@@ -199,6 +199,7 @@ export interface PayloadInput {
   fuel_kg?: number
   alt_dist_nm?: number
   extra_fuel_kg?: number
+  extra_fuel_lb?: number  // alternative to extra_fuel_kg (backend accepts both)
   reserve_min?: number
 }
 
@@ -375,3 +376,44 @@ export const navlog = {
   generate: (body: NavlogInput) => apiPost<NavlogResult>('/api/navlog', body),
 }
 
+// Activity / audit log
+export interface ApiActivity {
+  id: string
+  action: string
+  table_name: string | null
+  record_id: string | null
+  new_data: Record<string, unknown> | null
+  ip_address: string | null
+  created_at: string
+  username: string | null
+  full_name: string | null
+}
+
+export const activity = {
+  recent: (limit = 20) => apiGet<ApiActivity[]>(`/api/activity?limit=${limit}`),
+}
+
+export const performanceReport = {
+  generate: (body: any) => apiPost<any>('/api/performance/report', body),
+  downloadPdfUrl: '/api/performance/report/pdf'
+}
+
+// ─── OFP / Briefing ────────────────────────────────────────────────────────────
+export interface OfpInput {
+  aircraft_id: string
+  waypoints: { kind: 'airport' | 'fix'; id: string }[]
+  alt_id?: string | null
+  alt2_id?: string | null
+  oat: number
+  flap?: string
+  dep_date?: string | null
+  dep_time?: string | null
+  extra_fuel_lb?: number
+  reserve_min?: number | null
+  include_weather?: boolean
+}
+
+export const briefing = {
+  /** Returns a PDF blob — caller must handle raw fetch */
+  ofpUrl: '/api/briefing/ofp',
+}

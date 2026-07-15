@@ -327,8 +327,8 @@ export default function FlightPlanning() {
         <StatBox label="Est. Flight Time" value={navlog ? navlog.totals.ete_hhmm : '—'} loading={loadingNavlog} />
         <StatBox label="Cruise TAS" value={acRef ? `${acRef.cruise_tas_kt} kt` : '—'} loading={loadingSetup} />
         <StatBox label="Trip Fuel Required" value={navlog ? `${navlog.totals.fuel_kg.toLocaleString()} kg` : '—'} loading={loadingNavlog} />
-        <StatBox label="Avg Wind" value="220°/12 kt" sub="Estimated" />
-        <StatBox label="Cost Index" value="50" sub="Optimized for fuel" />
+        <StatBox label="Avg Wind" value="—" sub="Simulated" />
+        <StatBox label="Cost Index" value="—" sub="Optimized for fuel" />
       </div>
 
       {/* ─── MAIN CONTENT: Waypoints + Details ─── */}

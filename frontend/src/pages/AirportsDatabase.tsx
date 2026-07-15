@@ -173,7 +173,7 @@ export default function AirportsDatabase() {
                         {a.elevation_ft != null ? `${a.elevation_ft.toLocaleString()} ft` : '—'}
                       </td>
                       <td className="px-4 py-3 text-textsecondary font-mono text-xs whitespace-nowrap">
-                        {a.lat != null && a.lon != null
+                        {typeof a.lat === 'number' && typeof a.lon === 'number'
                           ? `${a.lat.toFixed(3)}°, ${a.lon.toFixed(3)}°`
                           : '—'}
                       </td>

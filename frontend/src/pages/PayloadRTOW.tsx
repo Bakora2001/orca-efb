@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import Card from '../components/ui/Card'
 import Combobox, { type ComboItem } from '../components/ui/Combobox'
-import { aircraft as aircraftApi, airports as airportsApi, payload as payloadApi, compute as computeApi, type ApiAircraft, type ApiAirport, type PayloadResult, type ComputeResult } from '../lib/api'
+import { aircraft as aircraftApi, airports as airportsApi, payload as payloadApi, compute as computeApi, weather as weatherApi, type ApiAircraft, type ApiAirport, type PayloadResult, type ComputeResult } from '../lib/api'
 
 export default function PayloadRTOW() {
   // Setup data
@@ -84,16 +84,33 @@ export default function PayloadRTOW() {
     setComputeRes(null)
   }, [selectedAircraft, aircraftList])
 
-  // Auto-fill OAT from departure airport elevation (ISA: 15°C - 1.98°C per 1000ft)
+  // Auto-fill OAT from live weather when departure airport changes
   useEffect(() => {
     if (!departure) return
     const ap = airportsList.find(a => a.id === departure)
-    if (!ap || ap.elevation_ft == null) return
-    const isaOat = Math.round(15 - (ap.elevation_ft / 1000) * 1.98)
-    setOat(isaOat)
+    if (!ap) return
+    
     // Clear results when departure changes
     setPayloadRes(null)
     setComputeRes(null)
+
+    // Fetch live OAT
+    weatherApi.get(ap.icao).then(res => {
+      // Basic METAR parse for Temp
+      const tempMatch = res.metar.match(/\s([M-]?\d{1,2})\/([M-]?\d{1,2})\s/)
+      if (tempMatch && tempMatch[1]) {
+        const tStr = tempMatch[1]
+        const tempC = tStr.startsWith('M') ? -parseInt(tStr.slice(1)) : parseInt(tStr)
+        setOat(tempC)
+      } else if (ap.elevation_ft != null) {
+        // Fallback to ISA if no live METAR temp
+        setOat(Math.round(15 - (ap.elevation_ft / 1000) * 1.98))
+      }
+    }).catch(() => {
+      if (ap.elevation_ft != null) {
+        setOat(Math.round(15 - (ap.elevation_ft / 1000) * 1.98))
+      }
+    })
   }, [departure, airportsList])
 
   const calculateData = async () => {

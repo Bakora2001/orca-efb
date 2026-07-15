@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import Card from '../components/ui/Card'
 import { Link, useNavigate } from 'react-router-dom'
-import { aircraft as aircraftApi, weather as weatherApi, health as healthApi, type WeatherResult } from '../lib/api'
+import { aircraft as aircraftApi, weather as weatherApi, health as healthApi, activity as activityApi, type WeatherResult, type ApiActivity } from '../lib/api'
 import { useAuth } from '../lib/AuthContext'
 
 // ── Small weather detail chip ──────────────────────────────────────────────────
@@ -42,22 +42,25 @@ export default function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const [fleetCount,  setFleetCount]  = useState<number | null>(null)
-  const [activeCount, setActiveCount] = useState<number | null>(null)
-  const [weather,     setWeather]     = useState<WeatherResult | null>(null)
-  const [wxError,     setWxError]     = useState(false)
-  const [systemHealth, setSystemHealth] = useState<{ api: string; database: string } | null>(null)
-  const [healthChecked, setHealthChecked] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [fleetCount,    setFleetCount]    = useState<number | null>(null)
+  const [activeCount,  setActiveCount]   = useState<number | null>(null)
+  const [weather,      setWeather]       = useState<WeatherResult | null>(null)
+  const [wxError,      setWxError]       = useState(false)
+  const [systemHealth, setSystemHealth]  = useState<{ api: string; database: string } | null>(null)
+  const [healthChecked,setHealthChecked] = useState(false)
+  const [loading,      setLoading]       = useState(true)
+  const [activityLogs, setActivityLogs]  = useState<ApiActivity[] | null>(null)
+  const [showAllLogs,  setShowAllLogs]   = useState(false)
 
   useEffect(() => {
     async function load() {
       // Fetch all in parallel, each with individual error handling so one
       // failing request doesn't prevent the others from rendering.
-      const [acResult, wxResult, hlResult] = await Promise.allSettled([
+      const [acResult, wxResult, hlResult, actResult] = await Promise.allSettled([
         aircraftApi.list(true),
         weatherApi.get('EGPD'),
         healthApi.check(),
+        activityApi.recent(15),
       ])
 
       if (acResult.status === 'fulfilled') {
@@ -78,6 +81,11 @@ export default function Dashboard() {
 
       if (hlResult.status === 'fulfilled' && hlResult.value) {
         setSystemHealth(hlResult.value)
+      }
+      if (actResult.status === 'fulfilled') {
+        setActivityLogs(actResult.value)
+      } else {
+        setActivityLogs([])
       }
       setHealthChecked(true)
       setLoading(false)
@@ -116,6 +124,31 @@ export default function Dashboard() {
   )
 
   const parsed = weather ? parseMetar(weather.metar) : null
+
+  // Map action codes to human-readable labels + colors
+  const ACTION_META: Record<string, { label: string; color: string; dot: string }> = {
+    USER_LOGIN:           { label: 'User Login',          color: 'text-emerald-700 bg-emerald-50 border-emerald-100', dot: 'bg-emerald-500' },
+    USER_LOGOUT:          { label: 'User Logout',         color: 'text-slate-600 bg-slate-50 border-slate-200',      dot: 'bg-slate-400' },
+    NAVLOG_GENERATED:     { label: 'Navlog Generated',    color: 'text-primary bg-blue-50 border-blue-100',          dot: 'bg-primary' },
+    PAYLOAD_CALCULATED:   { label: 'Payload Calc',        color: 'text-indigo-700 bg-indigo-50 border-indigo-100',   dot: 'bg-indigo-500' },
+    OFP_GENERATED:        { label: 'OFP Generated',       color: 'text-violet-700 bg-violet-50 border-violet-100',   dot: 'bg-violet-500' },
+    PERFORMANCE_REPORT:   { label: 'Perf Report',         color: 'text-amber-700 bg-amber-50 border-amber-100',      dot: 'bg-amber-500' },
+    AIRCRAFT_UPDATED:     { label: 'Aircraft Updated',    color: 'text-sky-700 bg-sky-50 border-sky-100',            dot: 'bg-sky-500' },
+    AIRPORT_UPDATED:      { label: 'Airport Updated',     color: 'text-teal-700 bg-teal-50 border-teal-100',         dot: 'bg-teal-500' },
+    PERFORMANCE_IMPORTED: { label: 'Perf Data Imported',  color: 'text-orange-700 bg-orange-50 border-orange-100',   dot: 'bg-orange-500' },
+  }
+
+  const VISIBLE_LOGS = 5
+
+  const relTime = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1)  return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24)  return `${hrs}h ago`
+    return `${Math.floor(hrs / 24)}d ago`
+  }
 
   return (
     <div className="space-y-6">
@@ -268,16 +301,61 @@ export default function Dashboard() {
               </span>
             </div>
 
-            {/* Empty state — no hardcoded dummy data */}
-            <div className="flex-1 flex flex-col items-center justify-center py-6 text-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
-                <Clock size={18} className="text-slate-400" />
-              </div>
-              <p className="text-sm font-semibold text-textsecondary">No recent activity</p>
-              <p className="text-xs text-slate-400 leading-relaxed max-w-[180px]">
-                Flight operations and system events will appear here as they occur.
-              </p>
+            <div className="flex-1 overflow-y-auto space-y-2">
+              {activityLogs === null ? (
+                // Skeleton
+                Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 p-2 animate-pulse">
+                    <div className="w-2 h-2 rounded-full bg-slate-200 shrink-0" />
+                    <div className="flex-1">
+                      <div className="h-3 bg-slate-100 rounded w-3/4 mb-1" />
+                      <div className="h-2.5 bg-slate-100 rounded w-1/2" />
+                    </div>
+                    <div className="h-2.5 w-10 bg-slate-100 rounded" />
+                  </div>
+                ))
+              ) : activityLogs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-6 text-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
+                    <Clock size={18} className="text-slate-400" />
+                  </div>
+                  <p className="text-sm font-semibold text-textsecondary">No recent activity</p>
+                  <p className="text-xs text-slate-400 leading-relaxed max-w-[180px]">
+                    Flight operations and system events will appear here as they occur.
+                  </p>
+                </div>
+              ) : (
+                (showAllLogs ? activityLogs : activityLogs.slice(0, VISIBLE_LOGS)).map(log => {
+                  const meta = ACTION_META[log.action] || { label: log.action, color: 'text-slate-600 bg-slate-50 border-slate-200', dot: 'bg-slate-400' }
+                  const actor = log.full_name || log.username || 'System'
+                  const detail = log.new_data
+                    ? Object.entries(log.new_data).filter(([k]) => !['aircraft_id','dep_id','dest_id'].includes(k)).slice(0,2).map(([k,v]) => `${k}: ${v}`).join(' • ')
+                    : null
+                  return (
+                    <div key={log.id} className="flex items-start gap-2.5 py-2 border-b border-borderc/60 last:border-0">
+                      <div className={`w-2 h-2 rounded-full ${meta.dot} mt-1.5 shrink-0`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${meta.color}`}>{meta.label}</span>
+                          <span className="text-[10px] text-textsecondary truncate">{actor}</span>
+                        </div>
+                        {detail && <p className="text-[10px] text-slate-400 mt-0.5 truncate">{detail}</p>}
+                      </div>
+                      <span className="text-[10px] text-slate-400 shrink-0 whitespace-nowrap">{relTime(log.created_at)}</span>
+                    </div>
+                  )
+                })
+              )}
             </div>
+
+            {activityLogs && activityLogs.length > VISIBLE_LOGS && (
+              <button
+                onClick={() => setShowAllLogs(v => !v)}
+                className="w-full mt-2 py-1.5 text-[11px] font-bold text-primary hover:text-primary-dark transition"
+              >
+                {showAllLogs ? `− Show less` : `⬇ Show ${activityLogs.length - VISIBLE_LOGS} more`}
+              </button>
+            )}
 
             <button
               onClick={() => navigate('/reports')}
