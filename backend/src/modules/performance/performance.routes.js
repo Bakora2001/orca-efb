@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import multer from 'multer'
 import * as controller from './performance.controller.js'
+import * as reportController from './report.controller.js'
 import { authenticate, authorize } from '../../middleware/auth.js'
 
 const router = Router()
@@ -22,6 +23,13 @@ router.get('/:aircraft_id', controller.getCells)
 // GET /api/performance/:aircraft_id/summary
 // Returns cell counts per table_type/flap (for aircraft card in fleet page)
 router.get('/:aircraft_id/summary', controller.getSummary)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REPORT GENERATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.post('/report', reportController.generateReport)
+router.post('/report/pdf', reportController.generatePdfReport)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // WRITE

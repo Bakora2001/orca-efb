@@ -2,6 +2,7 @@ import * as authService from './auth.service.js'
 import { blacklistToken } from '../../middleware/auth.js'
 import { verifyAccessToken } from '../../utils/jwt.js'
 import asyncHandler from '../../utils/asyncHandler.js'
+import { logActivity } from '../config/activity.service.js'
 
 export const register = asyncHandler(async (req, res) => {
   const user = await authService.register(req.body)
@@ -10,6 +11,14 @@ export const register = asyncHandler(async (req, res) => {
 
 export const login = asyncHandler(async (req, res) => {
   const result = await authService.login(req.body, res)
+  // Log login event
+  logActivity({
+    userId: result.user?.id,
+    action: 'USER_LOGIN',
+    tableName: 'users',
+    newData: { username: result.user?.username },
+    ipAddress: req.ip,
+  }).catch(() => {})
   res.json(result)
 })
 
@@ -34,6 +43,13 @@ export const logout = asyncHandler(async (req, res) => {
   }
 
   await authService.logout(res)
+  // Log logout event
+  logActivity({
+    userId: req.user?.id,
+    action: 'USER_LOGOUT',
+    tableName: 'users',
+    ipAddress: req.ip,
+  }).catch(() => {})
   res.json({ success: true, message: 'Logged out' })
 })
 

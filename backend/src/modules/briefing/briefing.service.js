@@ -189,9 +189,9 @@ function drawWeightFuelTable(doc, pd) {
 
   // Weight column
   const wRows = [
-    ['RTOW', `${pd.rtow_kg.toLocaleString()} kg`, pd.factor === 'STRUCT' ? AMBER : GREEN],
+    ['RTOW', `${pd.rtow_kg.toLocaleString()} kg`, pd.rtow_factor === 'STRUCT' ? AMBER : GREEN],
     ['TOW',  `${pd.tow_kg.toLocaleString()} kg`,  NAVY],
-    ['LW',   `${pd.lw_kg.toLocaleString()} kg`,   pd.lw_limit_ok ? NAVY : '#ff3d57'],
+    ['LW',   `${pd.ldw_kg.toLocaleString()} kg`,  pd.lw_limit_ok ? NAVY : '#ff3d57'],
     ['ZFW',  `${pd.zfw_kg.toLocaleString()} kg`,  NAVY],
     ['PAYLOAD', `${pd.payload_kg.toLocaleString()} kg`, GREEN],
     ['MAX PAX',  String(pd.pax), NAVY],

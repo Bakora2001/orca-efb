@@ -27,12 +27,15 @@ import chartRoutes       from './modules/charts/charts.routes.js'
 import userRoutes        from './modules/users/users.routes.js'
 import configRoutes      from './modules/config/config.routes.js'
 import briefingRoutes    from './modules/briefing/briefing.routes.js'
+import activityRoutes   from './modules/config/activity.routes.js'
 // import ofpRoutes      from './modules/ofp/ofp.routes.js'
 
 const app = express()
 
 // ─── Core Middleware ──────────────────────────────────────────────
-app.use(helmet())
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}))
 app.use(cors({
   origin: [
     process.env.CLIENT_ORIGIN ?? 'http://localhost:5173',
@@ -78,6 +81,7 @@ app.use('/api/charts',      chartRoutes)
 app.use('/api/users',       userRoutes)
 app.use('/api/config',      configRoutes)
 app.use('/api/briefing',    briefingRoutes)
+app.use('/api/activity',    activityRoutes)
 // app.use('/api/ofp',      ofpRoutes)
 
 // ─── 404 + Error Handlers (always last) ──────────────────────────

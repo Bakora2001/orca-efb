@@ -3,6 +3,7 @@ import { computeRTOW } from '../../services/rtow.service.js'
 import { query } from '../../config/database.js'
 import asyncHandler from '../../utils/asyncHandler.js'
 import AppError from '../../utils/AppError.js'
+import { logActivity } from '../config/activity.service.js'
 
 // ── POST /api/briefing/ofp ────────────────────────────────────────
 export const ofp = asyncHandler(async (req, res) => {
@@ -46,6 +47,15 @@ export const ofp = asyncHandler(async (req, res) => {
   const destIcao = waypoints[waypoints.length - 1]?.icao ?? 'DEST'
   const dateStr  = (dep_date || new Date().toISOString().slice(0,10)).replace(/-/g,'')
   const filename = `OFP_${depIcao}_${destIcao}_${dateStr}.pdf`
+
+  // Fire-and-forget audit log
+  logActivity({
+    userId: req.user?.id,
+    action: 'OFP_GENERATED',
+    tableName: 'briefing',
+    newData: { aircraft_id, dep: waypoints[0]?.id, dest: waypoints[waypoints.length - 1]?.id, oat },
+    ipAddress: req.ip,
+  }).catch(() => {})
 
   res.set({
     'Content-Type':        'application/pdf',
