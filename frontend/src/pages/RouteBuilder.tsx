@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   MapPin, Plus, Trash2, Navigation, Loader2, ArrowRight,
   Sparkles, BarChart3, Send, X, Search, GripVertical,
-  AlertTriangle, CheckCircle2, RefreshCw, Plane
+  AlertTriangle, CheckCircle2, RefreshCw, Plane,
+  Globe, ChevronDown, ChevronUp, Filter, ArrowRightLeft
 } from 'lucide-react'
 import {
   aircraft as aircraftApi, airports as airportsApi,
@@ -472,6 +473,66 @@ export default function RouteBuilder() {
   const canNavlog    = !!(acId && waypoints.length >= 2)
   const canSendToOfp = !!(depId && destId && acId)
 
+  // ── Browse Routes panel ────────────────────────────────────────────
+  const [browseOpen, setBrowseOpen] = useState(true)
+  const [filterCountry, setFilterCountry] = useState('')
+  const [filterRegion, setFilterRegion]   = useState('')
+  const [filterFrom, setFilterFrom]       = useState('')
+  const [filterTo, setFilterTo]           = useState('')
+  const [browseTerm, setBrowseTerm]       = useState('')
+
+  // Unique countries and regions from loaded airports
+  const countries = useMemo(() => {
+    const set = new Set(apList.map(a => a.country).filter(Boolean) as string[])
+    return Array.from(set).sort()
+  }, [apList])
+
+  const regions = useMemo(() => {
+    const set = new Set(
+      apList
+        .filter(a => !filterCountry || a.country === filterCountry)
+        .map(a => a.region)
+        .filter(Boolean) as string[]
+    )
+    return Array.from(set).sort()
+  }, [apList, filterCountry])
+
+  // Filtered airport list for browse panel
+  const browseAirports = useMemo(() => {
+    let list = apList
+    if (filterCountry) list = list.filter(a => a.country === filterCountry)
+    if (filterRegion)  list = list.filter(a => a.region === filterRegion)
+    if (browseTerm) {
+      const t = browseTerm.toUpperCase()
+      list = list.filter(a =>
+        a.icao?.toUpperCase().includes(t) ||
+        a.name?.toUpperCase().includes(t) ||
+        a.city?.toUpperCase()?.includes(t)
+      )
+    }
+    return list.slice(0, 200) // cap at 200 for performance
+  }, [apList, filterCountry, filterRegion, browseTerm])
+
+  // For 'between two countries' mode: cross-country pairs
+  const crossCountryPairs = useMemo(() => {
+    if (!filterFrom || !filterTo) return []
+    const fromAps = apList.filter(a => a.country === filterFrom)
+    const toAps   = apList.filter(a => a.country === filterTo)
+    const pairs: Array<{ dep: ApiAirport; dest: ApiAirport }> = []
+    for (const dep of fromAps.slice(0, 20)) {
+      for (const dest of toAps.slice(0, 20)) {
+        pairs.push({ dep, dest })
+      }
+    }
+    return pairs.slice(0, 100)
+  }, [apList, filterFrom, filterTo])
+
+  function loadRoute(depAp: ApiAirport, destAp: ApiAirport) {
+    setDepId(depAp.id)
+    setDestId(destAp.id)
+    setNavlog(null)
+  }
+
   // Compute total route distance (NM) from waypoints
   const totalNm = waypoints.length >= 2
     ? waypoints.slice(0, -1).reduce((sum, wp, i) => {
@@ -494,9 +555,200 @@ export default function RouteBuilder() {
           <h1 className="text-2xl font-bold text-textprimary">Route Builder</h1>
         </div>
         <p className="text-textsecondary text-sm">
-          Build waypoint sequences, calculate navlog and send your route to the OFP Generator.
+          Browse airport routes by country or region, then build waypoint sequences and calculate navlog.
         </p>
       </div>
+
+      {/* ── Browse Routes Panel ── */}
+      <Card className="!p-0 overflow-hidden">
+        <button
+          onClick={() => setBrowseOpen(v => !v)}
+          className="w-full flex items-center gap-2 px-4 py-3 hover:bg-slate-50 transition text-left"
+        >
+          <Globe size={15} className="text-primary" />
+          <span className="font-bold text-sm text-textprimary">Browse Airport Routes</span>
+          <span className="ml-2 text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">
+            {browseAirports.length} airports
+          </span>
+          <span className="ml-auto text-textsecondary">
+            {browseOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </span>
+        </button>
+
+        {browseOpen && (
+          <div className="border-t border-borderc px-4 py-3 space-y-3">
+            {/* Filter row */}
+            <div className="flex flex-wrap gap-2 items-end">
+              {/* Search */}
+              <div className="flex items-center gap-1.5 border border-borderc rounded-lg px-2.5 py-1.5 focus-within:border-primary transition min-w-[160px] flex-1">
+                <Search size={12} className="text-slate-400 shrink-0" />
+                <input
+                  value={browseTerm}
+                  onChange={e => setBrowseTerm(e.target.value)}
+                  placeholder="Search ICAO, name, city…"
+                  className="flex-1 text-xs outline-none bg-transparent text-textprimary placeholder:text-slate-400"
+                />
+                {browseTerm && <button onClick={() => setBrowseTerm('')}><X size={11} className="text-slate-400" /></button>}
+              </div>
+
+              {/* Country filter */}
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[9px] font-bold text-textsecondary uppercase tracking-wider">Country</label>
+                <select
+                  value={filterCountry}
+                  onChange={e => { setFilterCountry(e.target.value); setFilterRegion('') }}
+                  className="text-xs border border-borderc rounded-lg px-2 py-1.5 bg-white text-textprimary outline-none focus:border-primary min-w-[140px]"
+                >
+                  <option value="">All countries</option>
+                  {countries.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              {/* Region filter */}
+              {regions.length > 0 && (
+                <div className="flex flex-col gap-0.5">
+                  <label className="text-[9px] font-bold text-textsecondary uppercase tracking-wider">Region / FIR</label>
+                  <select
+                    value={filterRegion}
+                    onChange={e => setFilterRegion(e.target.value)}
+                    className="text-xs border border-borderc rounded-lg px-2 py-1.5 bg-white text-textprimary outline-none focus:border-primary min-w-[160px]"
+                  >
+                    <option value="">All regions</option>
+                    {regions.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {/* Between two countries */}
+              <div className="flex items-center gap-1.5 border border-dashed border-primary/40 rounded-lg px-3 py-1.5">
+                <ArrowRightLeft size={12} className="text-primary shrink-0" />
+                <span className="text-[10px] font-bold text-primary">Between:</span>
+                <select
+                  value={filterFrom}
+                  onChange={e => setFilterFrom(e.target.value)}
+                  className="text-xs border-0 outline-none bg-transparent text-textprimary max-w-[120px]"
+                >
+                  <option value="">From country</option>
+                  {countries.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <ArrowRight size={10} className="text-slate-400" />
+                <select
+                  value={filterTo}
+                  onChange={e => setFilterTo(e.target.value)}
+                  className="text-xs border-0 outline-none bg-transparent text-textprimary max-w-[120px]"
+                >
+                  <option value="">To country</option>
+                  {countries.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                {(filterFrom || filterTo) && (
+                  <button onClick={() => { setFilterFrom(''); setFilterTo('') }}>
+                    <X size={11} className="text-slate-400 hover:text-red-500" />
+                  </button>
+                )}
+              </div>
+
+              {/* Clear all filters */}
+              {(filterCountry || filterRegion || filterFrom || filterTo || browseTerm) && (
+                <button
+                  onClick={() => { setFilterCountry(''); setFilterRegion(''); setFilterFrom(''); setFilterTo(''); setBrowseTerm('') }}
+                  className="flex items-center gap-1 text-xs text-textsecondary hover:text-red-500 transition px-2 py-1.5 border border-dashed border-borderc rounded-lg"
+                >
+                  <RefreshCw size={11} /> Clear
+                </button>
+              )}
+            </div>
+
+            {/* Cross-country pairs table */}
+            {filterFrom && filterTo && crossCountryPairs.length > 0 ? (
+              <div className="rounded-xl border border-borderc overflow-hidden">
+                <div className="bg-slate-50 px-3 py-1.5 text-[10px] font-bold text-textsecondary uppercase tracking-wider flex items-center gap-2">
+                  <ArrowRightLeft size={10} />
+                  Cross-country routes: {filterFrom} → {filterTo}
+                  <span className="text-slate-400 font-normal">({crossCountryPairs.length} pairs)</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto divide-y divide-slate-50">
+                  {crossCountryPairs.map(({ dep, dest }, i) => (
+                    <button
+                      key={i}
+                      onClick={() => loadRoute(dep, dest)}
+                      className="w-full text-left px-3 py-2 hover:bg-primary/5 transition flex items-center gap-3 group"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-black text-textprimary font-mono">{dep.icao}</span>
+                        <span className="text-slate-400 mx-1.5 text-xs">→</span>
+                        <span className="text-xs font-black text-textprimary font-mono">{dest.icao}</span>
+                      </div>
+                      <div className="text-[10px] text-textsecondary truncate flex-1 min-w-0">
+                        {dep.name} → {dest.name}
+                      </div>
+                      <span className="text-[9px] text-primary font-bold opacity-0 group-hover:opacity-100 transition shrink-0">
+                        Load ↗
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              /* Airport grid */
+              <div className="rounded-xl border border-borderc overflow-hidden">
+                <div className="bg-slate-50 px-3 py-1.5 text-[10px] font-bold text-textsecondary uppercase tracking-wider">
+                  Airports — click to load as departure, double-click to load as destination
+                </div>
+                {loadingData ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 size={18} className="animate-spin text-primary" />
+                    <span className="ml-2 text-xs text-textsecondary">Loading airports…</span>
+                  </div>
+                ) : browseAirports.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-textsecondary">No airports match your filters.</div>
+                ) : (
+                  <div className="max-h-52 overflow-y-auto">
+                    <table className="w-full text-[11px]">
+                      <thead className="sticky top-0 bg-white border-b border-slate-100">
+                        <tr className="text-textsecondary font-bold text-[10px]">
+                          <th className="px-3 py-1.5 text-left">ICAO</th>
+                          <th className="px-3 py-1.5 text-left">Name</th>
+                          <th className="px-3 py-1.5 text-left">City</th>
+                          <th className="px-3 py-1.5 text-left">Country</th>
+                          <th className="px-3 py-1.5 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {browseAirports.map(ap => (
+                          <tr key={ap.id} className="hover:bg-slate-50/60 transition group">
+                            <td className="px-3 py-1.5 font-black font-mono text-textprimary">{ap.icao}</td>
+                            <td className="px-3 py-1.5 text-textprimary max-w-[180px] truncate">{ap.name}</td>
+                            <td className="px-3 py-1.5 text-textsecondary">{ap.city || '—'}</td>
+                            <td className="px-3 py-1.5 text-textsecondary">{ap.country || '—'}</td>
+                            <td className="px-3 py-1.5 text-right">
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition">
+                                <button
+                                  onClick={() => setDepId(ap.id)}
+                                  title="Set as Departure"
+                                  className="text-[9px] bg-green-500 text-white px-1.5 py-0.5 rounded font-bold hover:bg-green-600 transition"
+                                >
+                                  DEP
+                                </button>
+                                <button
+                                  onClick={() => setDestId(ap.id)}
+                                  title="Set as Destination"
+                                  className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded font-bold hover:bg-red-600 transition"
+                                >
+                                  DEST
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
 
       {/* Top strip: Aircraft + Dep/Dest + Actions */}
       <Card className="!p-4">

@@ -16,6 +16,9 @@ router.use(authenticate)
 // READ
 // ═══════════════════════════════════════════════════════════════════════════
 
+router.get('/chart-data', controller.getChartData)
+router.get('/chart-image', controller.getChartImage)
+
 // GET /api/performance/:aircraft_id
 // Returns all cells grouped by table_type → flap_setting
 router.get('/:aircraft_id', controller.getCells)

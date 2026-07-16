@@ -119,6 +119,45 @@ async function apiFetch<T>(
   return res.json() as Promise<T>
 }
 
+// ─── Authenticated blob fetcher ───────────────────────────────────────────────
+// Use for protected endpoints that return binary data (images, PDFs).
+// Returns a blob: URL — caller MUST call URL.revokeObjectURL() when done.
+
+export async function fetchBlobUrl(path: string): Promise<string> {
+  const headers: Record<string, string> = {}
+  if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+
+  let res = await fetch(`${BASE_URL}${path}`, {
+    headers,
+    credentials: 'include',
+  })
+
+  if (res.status === 401) {
+    // try refresh once
+    if (!_refreshing) {
+      _refreshing = refreshAccessToken().finally(() => { _refreshing = null })
+    }
+    const refreshed = await _refreshing
+    if (refreshed) {
+      const headers2: Record<string, string> = {}
+      if (_accessToken) headers2['Authorization'] = `Bearer ${_accessToken}`
+      res = await fetch(`${BASE_URL}${path}`, { headers: headers2, credentials: 'include' })
+    }
+  }
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`
+    try {
+      const body = await res.json()
+      msg = body.message || body.error || msg
+    } catch { /* ignore */ }
+    throw new Error(msg)
+  }
+
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
 // ─── Types (API shapes) ──────────────────────────────────────────────────────
 
 export interface ApiAircraft {
@@ -146,6 +185,8 @@ export interface ApiAirport {
   name: string
   city: string | null
   country: string | null
+  country_iso: string | null
+  region: string | null
   elevation_ft: number | null
   lat: number | null
   lon: number | null
@@ -392,6 +433,98 @@ export interface ApiActivity {
 export const activity = {
   recent: (limit = 20) => apiGet<ApiActivity[]>(`/api/activity?limit=${limit}`),
 }
+
+export interface ChartDataParams {
+  aircraft_id: string
+  airport_id: string
+  oat: number
+  flap?: string
+  table_type?: string
+}
+
+export interface WatCurvePoint { temp_c: number; value_kg: number }
+export interface WatCurve { elevation_ft: number; points: WatCurvePoint[] }
+export interface WatFlapData { flap: string; curves: WatCurve[]; interpolated_kg: number | null }
+export interface WatChartData {
+  flap_used: string | null
+  interpolated_kg: number | null
+  oat_c: number
+  elevation_ft: number
+  flapCurves: WatFlapData[]
+}
+
+export interface FieldWeightPoint {
+  weight_kg: number
+  required_m: number
+}
+export interface FieldWeightMatrixRow {
+  weight_kg: number
+  temp_20: number | null
+  temp_30: number | null
+  temp_40: number | null
+}
+export interface FieldFlapData {
+  flap: string
+  weight_points: FieldWeightPoint[]
+  weight_matrix: FieldWeightMatrixRow[]
+  limiting_weight_kg: number | null
+}
+export interface FieldChartData {
+  available_rwy_m: number | null
+  eff_rwy_m: number | null
+  surface_factor: number
+  limiting_weight_kg: number | null
+  oat_c: number
+  elevation_ft: number
+  flapData: FieldFlapData[]
+}
+
+export interface ChartDataResult {
+  aircraft: { id: string; registration: string; type: string; mtow_kg: number }
+  airport:  { id: string; icao: string; name: string; elevation_ft: number; rwy_m: number | null; surface: string | null }
+  oat_c: number
+  flap: string
+  wat:  WatChartData | null
+  toda: FieldChartData | null
+  asda: FieldChartData | null
+}
+
+export const performanceChart = {
+  getData: (params: ChartDataParams) => {
+    const q = new URLSearchParams({
+      aircraft_id: params.aircraft_id,
+      airport_id:  params.airport_id,
+      oat:         String(params.oat),
+      ...(params.flap       ? { flap: params.flap }             : {}),
+      ...(params.table_type ? { table_type: params.table_type } : {}),
+    })
+    return apiGet<ChartDataResult>(`/api/performance/chart-data?${q.toString()}`)
+  },
+
+  /** Returns a URL that, when fetched, serves a JPEG of the AFM chart with
+   *  the nomograph solution lines drawn on top.  Call this from an <img src> */
+  chartImageUrl: (params: {
+    aircraft_id: string
+    airport_id:  string
+    table_type:  string
+    flap:        string
+    oat:         number
+    rtow_kg?:    number | null
+    factor?:     string | null
+  }) => {
+    const q = new URLSearchParams({
+      aircraft_id: params.aircraft_id,
+      airport_id:  params.airport_id,
+      table_type:  params.table_type,
+      flap:        params.flap,
+      oat:         String(params.oat),
+      ...(params.rtow_kg != null ? { rtow_kg: String(params.rtow_kg) } : {}),
+      ...(params.factor          ? { factor:  params.factor }          : {}),
+    })
+    return `/api/performance/chart-image?${q.toString()}`
+  },
+}
+
 
 export const performanceReport = {
   generate: (body: any) => apiPost<any>('/api/performance/report', body),

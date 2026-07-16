@@ -7,6 +7,7 @@ import {
 import Card from '../components/ui/Card'
 import Combobox, { type ComboItem } from '../components/ui/Combobox'
 import { aircraft as aircraftApi, airports as airportsApi, payload as payloadApi, compute as computeApi, weather as weatherApi, type ApiAircraft, type ApiAirport, type PayloadResult, type ComputeResult } from '../lib/api'
+import PerformanceChartModal, { type ChartModalParams } from '../components/ui/PerformanceChartModal'
 
 export default function PayloadRTOW() {
   // Setup data
@@ -43,6 +44,7 @@ export default function PayloadRTOW() {
   const [error, setError] = useState<string | null>(null)
   const [payloadRes, setPayloadRes] = useState<PayloadResult | null>(null)
   const [computeRes, setComputeRes] = useState<ComputeResult | null>(null)
+  const [activeChartParams, setActiveChartParams] = useState<ChartModalParams | null>(null)
 
   // Sliders for What-if Analysis
   const [whatIfFuel, setWhatIfFuel] = useState<number | ''>('')
@@ -340,19 +342,69 @@ export default function PayloadRTOW() {
               </h2>
               
               <div className="grid grid-cols-2 gap-3 text-center text-xs">
-                <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex flex-col justify-center">
+                <div 
+                  onClick={() => setActiveChartParams({
+                    aircraft_id: selectedAircraft,
+                    airport_id: departure,
+                    oat: Number(oat) || 0,
+                    flap: flap ? flap.toString() : 'auto',
+                    focusTab: 'RTOW',
+                    rtow_kg: payloadRes.rtow_kg,
+                    wat_kg: computeRes.detail?.wat_kg,
+                    toda_kg: computeRes.detail?.toda_kg,
+                    asda_kg: computeRes.detail?.asda_kg,
+                    structural_kg: computeRes.detail?.mtow_kg,
+                    factor: computeRes.factor,
+                  })}
+                  className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex flex-col justify-center cursor-pointer hover:bg-slate-100 hover:border-slate-200 transition select-none"
+                >
                   <span className="text-[9px] font-bold text-textsecondary uppercase tracking-wider mb-0.5">RTOW</span>
                   <span className="text-sm font-black font-mono text-textprimary">{payloadRes.rtow_kg.toLocaleString()} kg</span>
-                  <span className="text-[8px] text-textsecondary mt-0.5">Max allowed weight</span>
+                  <span className="text-[8px] text-textsecondary mt-0.5">Max allowed weight (click to see detail)</span>
                 </div>
-                <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex flex-col justify-center">
+                <div 
+                  onClick={() => setActiveChartParams({
+                    aircraft_id: selectedAircraft,
+                    airport_id: departure,
+                    oat: Number(oat) || 0,
+                    flap: flap ? flap.toString() : 'auto',
+                    focusTab: 'WAT',
+                    rtow_kg: payloadRes.rtow_kg,
+                    wat_kg: computeRes.detail?.wat_kg,
+                    toda_kg: computeRes.detail?.toda_kg,
+                    asda_kg: computeRes.detail?.asda_kg,
+                    structural_kg: computeRes.detail?.mtow_kg,
+                    factor: computeRes.factor,
+                  })}
+                  className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex flex-col justify-center cursor-pointer hover:bg-slate-100 hover:border-slate-200 transition select-none"
+                >
                   <span className="text-[9px] font-bold text-textsecondary uppercase tracking-wider mb-0.5">WAT Limit</span>
                   <span className="text-sm font-black font-mono text-textprimary">{Number(computeRes.detail?.wat_kg || 0).toLocaleString()} kg</span>
-                  <span className="text-[8px] text-textsecondary mt-0.5">Weather & Alt</span>
+                  <span className="text-[8px] text-textsecondary mt-0.5">Weather & Alt (click to see detail)</span>
                 </div>
-                <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex flex-col justify-center items-center col-span-2">
+                <div 
+                  onClick={() => {
+                    const f = computeRes.factor;
+                    const tab = (f === 'WAT' || f === 'TODA' || f === 'ASDA') ? f : 'RTOW';
+                    setActiveChartParams({
+                      aircraft_id: selectedAircraft,
+                      airport_id: departure,
+                      oat: Number(oat) || 0,
+                      flap: flap ? flap.toString() : 'auto',
+                      focusTab: tab,
+                      rtow_kg: payloadRes.rtow_kg,
+                      wat_kg: computeRes.detail?.wat_kg,
+                      toda_kg: computeRes.detail?.toda_kg,
+                      asda_kg: computeRes.detail?.asda_kg,
+                      structural_kg: computeRes.detail?.mtow_kg,
+                      factor: computeRes.factor,
+                    });
+                  }}
+                  className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex flex-col justify-center items-center col-span-2 cursor-pointer hover:bg-slate-100 hover:border-slate-200 transition select-none"
+                >
                   <span className="text-[9px] font-bold text-textsecondary uppercase tracking-wider mb-0.5">Limiting Factor</span>
                   <span className="text-sm font-black text-primary">{computeRes.factor || 'N/A'}</span>
+                  <span className="text-[8px] text-textsecondary mt-0.5">Governing restriction (click to see detail)</span>
                 </div>
               </div>
 
@@ -403,6 +455,13 @@ export default function PayloadRTOW() {
           </div>
         )}
       </div>
+
+      {activeChartParams && (
+        <PerformanceChartModal
+          params={activeChartParams}
+          onClose={() => setActiveChartParams(null)}
+        />
+      )}
     </div>
   )
 }

@@ -51,6 +51,10 @@ export default function OfpGenerator() {
   const [reserveMin, setReserveMin] = useState<string>('')
   const [includeWx, setIncludeWx]   = useState(true)
 
+  // Route Builder integration
+  const [routeWaypoints, setRouteWaypoints] = useState<{ kind: 'airport' | 'fix'; id: string }[]>([])
+  const [fromRouteBuilder, setFromRouteBuilder] = useState(false)
+
   // Preview payload
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewData, setPreviewData] = useState<PayloadResult | null>(null)
@@ -61,12 +65,39 @@ export default function OfpGenerator() {
   const [genError, setGenError]   = useState<string | null>(null)
   const [genSuccess, setGenSuccess] = useState(false)
 
-  // Load aircraft + airports
+  // Load aircraft + airports, then restore any Route Builder session
   useEffect(() => {
     Promise.all([aircraftApi.list(), airportsApi.list()])
       .then(([ac, ap]) => {
-        setAcList(ac.filter(a => a.is_active))
-        setApList(ap.filter(a => a.is_active))
+        const activeAc = ac.filter(a => a.is_active)
+        const activeAp = ap.filter(a => a.is_active)
+        setAcList(activeAc)
+        setApList(activeAp)
+
+        // ── Auto-populate from Route Builder ──
+        const raw = sessionStorage.getItem('ofp_route')
+        if (raw) {
+          try {
+            const saved = JSON.parse(raw) as {
+              acId?: string; depId?: string; destId?: string;
+              waypoints?: { kind: string; id: string }[]
+            }
+            // Verify referenced IDs actually exist in the active lists
+            if (saved.acId  && activeAc.some(a => a.id === saved.acId))  setAcId(saved.acId)
+            if (saved.depId && activeAp.some(a => a.id === saved.depId)) setDepId(saved.depId)
+            if (saved.destId && activeAp.some(a => a.id === saved.destId)) setDestId(saved.destId)
+            if (Array.isArray(saved.waypoints) && saved.waypoints.length >= 2) {
+              // Cast kind to the union type expected by OfpInput
+              const typed = saved.waypoints.map((w: { kind: string; id: string }) => ({
+                kind: (w.kind === 'fix' ? 'fix' : 'airport') as 'airport' | 'fix',
+                id: w.id,
+              }))
+              setRouteWaypoints(typed)
+            }
+            setFromRouteBuilder(true)
+            sessionStorage.removeItem('ofp_route')  // consume so refreshing doesn't re-apply
+          } catch { /* ignore malformed data */ }
+        }
       })
       .catch(console.error)
       .finally(() => setLoadingData(false))
@@ -137,12 +168,15 @@ export default function OfpGenerator() {
     setGenError(null)
     setGenSuccess(false)
 
+    // Use full route waypoints from Route Builder when available,
+    // otherwise fall back to simple dep → dest pair
+    const waypointList: { kind: 'airport' | 'fix'; id: string }[] = routeWaypoints.length >= 2
+      ? routeWaypoints
+      : [{ kind: 'airport' as const, id: depId }, { kind: 'airport' as const, id: destId }]
+
     const body: OfpInput = {
       aircraft_id: acId,
-      waypoints: [
-        { kind: 'airport', id: depId },
-        { kind: 'airport', id: destId },
-      ],
+      waypoints: waypointList,
       alt_id:   altId  || null,
       alt2_id:  alt2Id || null,
       oat:      parseFloat(oat),
@@ -215,6 +249,27 @@ export default function OfpGenerator() {
           {generating ? 'Generating…' : 'Generate & Download OFP'}
         </button>
       </div>
+
+      {/* Route Builder import banner */}
+      {fromRouteBuilder && (
+        <div className="flex items-center justify-between gap-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl px-4 py-3 text-sm">
+          <div className="flex items-center gap-2">
+            <ArrowRight size={16} className="shrink-0" />
+            <span>
+              <strong>Route imported from Route Builder</strong>
+              {routeWaypoints.length >= 2 && (
+                <span className="ml-1 text-indigo-500">({routeWaypoints.length} waypoints loaded)</span>
+              )}
+              {' '}— aircraft, departure and destination have been auto-filled.
+            </span>
+          </div>
+          <button
+            onClick={() => { setFromRouteBuilder(false); setRouteWaypoints([]) }}
+            className="shrink-0 text-indigo-400 hover:text-indigo-600 font-bold leading-none text-base"
+            title="Dismiss"
+          >✕</button>
+        </div>
+      )}
 
       {/* Error / Success banners */}
       {genError && (

@@ -10,6 +10,7 @@ import { aircraft as aircraftApi, airports as airportsApi, performanceReport, ge
 import type { ApiAirport } from '../lib/api'
 import Combobox from '../components/ui/Combobox'
 import Card from '../components/ui/Card'
+import PerformanceChartModal, { type ChartModalParams } from '../components/ui/PerformanceChartModal'
 
 // ── Types ─────────────────────────────────────────────────────────────
 interface ReportRow {
@@ -61,13 +62,16 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 // ── Per-airport RTOW Chart ─────────────────────────────────────────────
-function AirportChart({ rows, icao, airport, elev_ft, rwy_m, surface }: {
+function AirportChart({ rows, icao, airport, elev_ft, rwy_m, surface, aircraftId, flapSetting, onCellClick }: {
   rows: ReportRow[]
   icao: string
   airport: string
   elev_ft: number | null
   rwy_m: number | null
   surface: string | null
+  aircraftId: string
+  flapSetting: string
+  onCellClick: (params: ChartModalParams) => void
 }) {
   // Build chart data: one data point per temperature, each with WAT/TODA/ASDA/RTOW values
   const chartData = rows.map(r => ({
@@ -241,19 +245,45 @@ function AirportChart({ rows, icao, airport, elev_ft, rwy_m, surface }: {
               const isGoverning = (v: number | null) =>
                 v != null && Math.abs(Math.round(v) - Math.round(r.rtow_kg)) < 10
 
+              const cellParams = (focusTab: 'WAT' | 'TODA' | 'ASDA' | 'RTOW') => ({
+                aircraft_id: aircraftId,
+                airport_id: r.airport_id,
+                oat: r.oat_c,
+                flap: r.wat_flap || flapSetting,
+                focusTab,
+                rtow_kg: r.rtow_kg,
+                wat_kg: r.wat_kg,
+                toda_kg: r.toda_kg,
+                asda_kg: r.asda_kg,
+                structural_kg: r.structural_kg,
+                factor: r.factor,
+              })
+
               return (
                 <tr key={idx} className="hover:bg-slate-50/50 transition">
                   <td className="px-4 py-2.5 font-bold text-slate-700">{r.oat_c}°C</td>
-                  <td className={`px-4 py-2.5 text-right font-mono font-semibold ${isGoverning(r.wat_kg) ? 'text-primary font-black' : 'text-slate-600'}`}>
+                  <td 
+                    onClick={() => r.wat_kg != null && onCellClick(cellParams('WAT'))}
+                    className={`px-4 py-2.5 text-right font-mono font-semibold select-none ${r.wat_kg != null ? 'cursor-pointer hover:underline hover:text-blue-600' : ''} ${isGoverning(r.wat_kg) ? 'text-primary font-black' : 'text-slate-600'}`}
+                  >
                     {fmt(r.wat_kg)}{r.wat_flap ? ` F${r.wat_flap}` : ''}
                   </td>
-                  <td className={`px-4 py-2.5 text-right font-mono font-semibold ${isGoverning(r.toda_kg) ? 'text-amber-600 font-black' : r.toda_kg == null ? 'text-slate-300' : 'text-slate-600'}`}>
+                  <td 
+                    onClick={() => r.toda_kg != null && onCellClick(cellParams('TODA'))}
+                    className={`px-4 py-2.5 text-right font-mono font-semibold select-none ${r.toda_kg != null ? 'cursor-pointer hover:underline hover:text-amber-600' : ''} ${isGoverning(r.toda_kg) ? 'text-amber-600 font-black' : r.toda_kg == null ? 'text-slate-300' : 'text-slate-600'}`}
+                  >
                     {fmt(r.toda_kg)}
                   </td>
-                  <td className={`px-4 py-2.5 text-right font-mono font-semibold ${isGoverning(r.asda_kg) ? 'text-orange-600 font-black' : r.asda_kg == null ? 'text-slate-300' : 'text-slate-600'}`}>
+                  <td 
+                    onClick={() => r.asda_kg != null && onCellClick(cellParams('ASDA'))}
+                    className={`px-4 py-2.5 text-right font-mono font-semibold select-none ${r.asda_kg != null ? 'cursor-pointer hover:underline hover:text-orange-600' : ''} ${isGoverning(r.asda_kg) ? 'text-orange-600 font-black' : r.asda_kg == null ? 'text-slate-300' : 'text-slate-600'}`}
+                  >
                     {fmt(r.asda_kg)}
                   </td>
-                  <td className="px-4 py-2.5 text-right font-mono font-black text-primary bg-blue-50/30">
+                  <td 
+                    onClick={() => onCellClick(cellParams('RTOW'))}
+                    className="px-4 py-2.5 text-right font-mono font-black text-primary bg-blue-50/30 cursor-pointer hover:underline hover:text-primary-dark select-none"
+                  >
                     {fmt(r.rtow_kg)}
                   </td>
                   <td className="px-4 py-2.5 text-right">
@@ -290,6 +320,7 @@ export default function PerformanceAnalysis() {
   const [loading, setLoading] = useState(false)
   const [reportData, setReportData] = useState<ReportData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [activeChartParams, setActiveChartParams] = useState<ChartModalParams | null>(null)
 
   const acObj = acList.find(a => a.id === selectedAc)
   const availableFlaps: string[] = acObj?.flaps || []
@@ -558,6 +589,9 @@ export default function PerformanceAnalysis() {
                   elev_ft={group.meta.elev_ft}
                   rwy_m={group.meta.rwy_m}
                   surface={group.meta.surface}
+                  aircraftId={reportData.aircraft.id}
+                  flapSetting={reportData.flap}
+                  onCellClick={setActiveChartParams}
                 />
               ))}
             </Card>
@@ -574,6 +608,13 @@ export default function PerformanceAnalysis() {
           )}
         </div>
       </div>
+
+      {activeChartParams && (
+        <PerformanceChartModal
+          params={activeChartParams}
+          onClose={() => setActiveChartParams(null)}
+        />
+      )}
     </div>
   )
 }
