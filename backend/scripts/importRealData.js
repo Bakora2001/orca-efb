@@ -17,9 +17,18 @@ async function importRealData() {
   console.log('📦 Importing REAL DATA from Python folder (NO DUMMY DATA)...\n')
 
   try {
+    // Helper to find data folder
+    const getPath = (rel) => {
+      const p1 = path.resolve(__dirname, '../../../orca-efb-v14', rel)
+      if (fs.existsSync(p1)) return p1
+      const p2 = path.resolve(__dirname, '../../../orca-efb-v14-main/orca-efb-v14-main', rel)
+      if (fs.existsSync(p2)) return p2
+      return p1
+    }
+
     // 1. Import ALL airports
     console.log('1️⃣ Importing ALL airports...')
-    const airportsPath = path.join(__dirname, '../../orca-efb-v14-main/orca-efb-v14-main/data/airports_v14.csv')
+    const airportsPath = getPath('data/airports_v14.csv')
     if (fs.existsSync(airportsPath)) {
       const csvContent = fs.readFileSync(airportsPath, 'utf-8')
       const airports = parse(csvContent, { columns: true, skip_empty_lines: true, trim: true })
@@ -70,7 +79,7 @@ async function importRealData() {
 
     // 2. Import navigation points from multiple AIP sources
     console.log('\n2️⃣ Importing navigation points from multiple AIPs...')
-    const dataDir = path.join(__dirname, '../../orca-efb-v14-main/orca-efb-v14-main/data')
+    const dataDir = getPath('data')
     const navFiles = fs.readdirSync(dataDir).filter(f => f.includes('enr44') || f.includes('nasr'))
     
     let totalNav = 0
@@ -120,7 +129,7 @@ async function importRealData() {
 
     // 3. Import ALL airways
     console.log('\n3️⃣ Importing ALL airways...')
-    const airwaysPath = path.join(__dirname, '../../orca-efb-v14-main/orca-efb-v14-main/data/airway_segments.csv')
+    const airwaysPath = getPath('data/airway_segments.csv')
     if (fs.existsSync(airwaysPath)) {
       const csvContent = fs.readFileSync(airwaysPath, 'utf-8')
       const airways = parse(csvContent, { columns: true, skip_empty_lines: true, trim: true })
