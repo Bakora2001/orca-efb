@@ -490,7 +490,7 @@ export default function RouteBuilder() {
       {/* Header */}
       <div>
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-2xl">🗺️</span>
+          <span className="text-2xl"></span>
           <h1 className="text-2xl font-bold text-textprimary">Route Builder</h1>
         </div>
         <p className="text-textsecondary text-sm">

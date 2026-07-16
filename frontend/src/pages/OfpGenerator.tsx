@@ -198,7 +198,7 @@ export default function OfpGenerator() {
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-2xl">📋</span>
+            <span className="text-2xl"></span>
             <h1 className="text-2xl font-bold text-textprimary">OFP Generator</h1>
           </div>
           <p className="text-textsecondary text-sm">
