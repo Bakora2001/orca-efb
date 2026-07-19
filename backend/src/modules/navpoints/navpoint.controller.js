@@ -38,14 +38,15 @@ export const remove = asyncHandler(async (req, res) => {
 })
 
 export const legSuggestions = asyncHandler(async (req, res) => {
-  const { dep_id, dest_id, limit } = req.query
+  const { dep_id, dest_id, limit, attempt } = req.query
   if (!dep_id || !dest_id) {
     return res.status(400).json({ success: false, message: 'dep_id and dest_id are required' })
   }
   const fixes = await navpointService.getLegSuggestions(
     dep_id,
     dest_id,
-    limit ? parseInt(limit) : 14
+    limit ? parseInt(limit) : 14,
+    attempt ? parseInt(attempt) : 1
   )
   // Plain array — mockup maps directly over this
   res.json(fixes)
