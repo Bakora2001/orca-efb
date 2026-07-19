@@ -173,7 +173,8 @@ export default function FlightPlanning() {
   const addWaypoint = (wp: ApiNavpoint) => {
     setWaypoints(prev => {
       const copy = [...prev]
-      copy.splice(copy.length - 1, 0, { kind: 'fix', id: wp.id, ident: wp.ident, name: wp.name || wp.type, lat: wp.lat, lon: wp.lon })
+      copy.splice(copy.length - 1, 0, { kind: 'fix', id: wp.id, ident: wp.ident, name: wp.name || wp.point_type || wp.ident, lat: wp.lat, lon: wp.lon })
+
       return copy
     })
     setIsSearching(false)
