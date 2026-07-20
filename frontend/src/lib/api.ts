@@ -382,12 +382,20 @@ async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
   const res = await apiFetch<{ success: boolean; data: T }>(path, { method: 'PATCH', ...(body ? { body: JSON.stringify(body) } : {}) })
   return res.data
 }
+async function apiDelete<T>(path: string): Promise<T> {
+  const res = await apiFetch<{ success: boolean; data: T }>(path, { method: 'DELETE' })
+  return res.data
+}
 
 // Aircraft
 export const aircraft = {
   list: (includeInactive = false) =>
     apiGet<ApiAircraft[]>(`/api/aircraft${includeInactive ? '?includeInactive=true' : ''}`),
   get: (id: string) => apiGet<ApiAircraft>(`/api/aircraft/${id}`),
+  create: (data: Partial<ApiAircraft>) => apiPost<ApiAircraft>('/api/aircraft', data),
+  update: (id: string, data: Partial<ApiAircraft>) => apiPatch<ApiAircraft>(`/api/aircraft/${id}`, data),
+  delete: (id: string) => apiDelete<void>(`/api/aircraft/${id}`),
+  bulkImport: (data: Partial<ApiAircraft>[]) => apiPost<{ imported: number }>('/api/aircraft/bulk', { aircrafts: data }),
 }
 
 // Airports
