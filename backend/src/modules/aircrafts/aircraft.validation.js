@@ -29,3 +29,7 @@ export const createAircraftSchema = z.object({
 })
 
 export const updateAircraftSchema = createAircraftSchema.partial()
+
+export const bulkCreateAircraftSchema = z.object({
+  aircrafts: z.array(createAircraftSchema).min(1, 'Must provide at least one aircraft'),
+})

@@ -17,6 +17,11 @@ export const create = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: aircraft })
 })
 
+export const bulkCreate = asyncHandler(async (req, res) => {
+  const result = await aircraftService.bulkCreateAircraft(req.body.aircrafts)
+  res.status(201).json({ success: true, data: result })
+})
+
 export const update = asyncHandler(async (req, res) => {
   const aircraft = await aircraftService.updateAircraft(req.params.id, req.body)
   res.json({ success: true, data: aircraft })

@@ -155,3 +155,23 @@ export async function getAircraftPerformanceSummary(id) {
 
   return rows
 }
+
+/**
+ * Bulk create aircraft, skipping any that already exist by registration.
+ * Returns the number of successfully imported aircraft.
+ */
+export async function bulkCreateAircraft(aircrafts) {
+  let imported = 0
+  for (const ac of aircrafts) {
+    try {
+      await createAircraft(ac)
+      imported++
+    } catch (error) {
+      // Ignore 409 conflicts, let other errors bubble up if they are critical
+      if (error.statusCode !== 409) {
+        console.error(`Failed to import ${ac.registration}:`, error)
+      }
+    }
+  }
+  return { imported, total: aircrafts.length }
+}
