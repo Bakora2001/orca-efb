@@ -266,9 +266,9 @@ export interface PayloadResult {
   ldw_kg: number
   bew_kg: number
   fob_kg: number
-  max_pax: number
+  pax: number
   rtow_kg: number
-  limiting_factor: string
+  rtow_factor: string
   trip_nm: number
   max_fuel_kg?: number
   fuel_exceeded?: boolean

@@ -4,6 +4,7 @@ import {
   Sparkles, BarChart3, Send, X, Search, GripVertical,
   AlertTriangle, CheckCircle2, RefreshCw, Plane
 } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   aircraft as aircraftApi, airports as airportsApi,
   navpoints as navpointsApi, navlog as navlogApi,
@@ -495,6 +496,16 @@ function MapEventsHandler({ waypoints, setZoom, setBounds, isFullscreen }: { way
       setBounds(map.getBounds())
     }
   })
+    // Fix map rendering issues when container resizes due to fullscreen toggle and animation
+  useEffect(() => {
+    // Trigger invalidateSize early for immediate jumps and at the end of the framer-motion transition
+    const timer1 = setTimeout(() => map.invalidateSize(), 50)
+    const timer2 = setTimeout(() => map.invalidateSize(), 700)
+    return () => {
+      clearTimeout(timer1)
+      clearTimeout(timer2)
+    }
+  }, [isFullscreen, map])
   
   useEffect(() => {
     setZoom(map.getZoom())
@@ -506,17 +517,6 @@ function MapEventsHandler({ waypoints, setZoom, setBounds, isFullscreen }: { way
       map.setView([Number(waypoints[0].lat), Number(waypoints[0].lon)], 9)
     }
   }, [waypoints, map, setZoom])
-
-  // Fix map rendering issues when container resizes due to fullscreen toggle
-  useEffect(() => {
-    // Trigger multiple times to handle CSS transitions completing
-    const delays = [10, 50, 100, 200, 400]
-    const timers = delays.map(delay => setTimeout(() => {
-      map.invalidateSize()
-    }, delay))
-    
-    return () => timers.forEach(clearTimeout)
-  }, [isFullscreen, map])
 
   return null
 }
@@ -584,7 +584,7 @@ function RouteMap({ waypoints, totalNm, allAirports, allNavpoints, setDepId, set
   }
 
   return (
-    <div className={`w-full rounded-xl overflow-hidden border border-borderc relative z-0 bg-[#d8d0aa] ${isFullscreen ? 'flex-1 min-h-0' : 'h-[440px]'}`}>
+    <motion.div layout className={`w-full rounded-xl overflow-hidden border border-borderc relative z-0 bg-[#d8d0aa] ${isFullscreen ? 'flex-1 min-h-0' : 'h-[440px]'}`}>
       {/* Layer switcher overlay */}
       <div className="absolute top-3 right-3 z-[1000] flex gap-1 bg-white/90 backdrop-blur-sm rounded-lg border border-slate-200 shadow-md p-1">
         {TILE_LAYERS.map((tl, idx) => (
@@ -611,6 +611,11 @@ function RouteMap({ waypoints, totalNm, allAirports, allNavpoints, setDepId, set
           Click an airport to set Destination
         </div>
       )}
+
+      {/* Zoom indicator overlay */}
+      <div className="absolute top-24 left-3 z-[1000] bg-slate-900/70 backdrop-blur-sm text-white rounded-lg px-2 py-1 text-[9px] font-mono border border-white/10 shadow-sm transition-opacity">
+        Z{zoom}
+      </div>
 
       {/* Route stats overlay */}
       {waypoints.length >= 2 && (
@@ -765,7 +770,7 @@ function RouteMap({ waypoints, totalNm, allAirports, allNavpoints, setDepId, set
           </Marker>
         ))}
       </MapContainer>
-    </div>
+    </motion.div>
   )
 }
 
@@ -1169,8 +1174,25 @@ export default function RouteBuilder() {
 
         {/* Right: Map + Navlog */}
         <div className="lg:col-span-3 space-y-4">
+          <AnimatePresence>
+            {isFullscreen && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[9998]"
+                onClick={() => setIsFullscreen(false)}
+              />
+            )}
+          </AnimatePresence>
           {/* SVG Route Map */}
-          <Card className={`!p-3 ${isFullscreen ? 'fixed inset-4 z-[9999] flex flex-col' : ''}`}>
+          <div style={{ height: isFullscreen ? 500 : 'auto' }}>
+            <motion.div 
+              layout
+              layoutId="map-container"
+              transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+              className={`bg-surface border border-borderc rounded-xl shadow-card !p-3 ${isFullscreen ? 'fixed inset-4 z-[9999] flex flex-col' : 'p-5 relative'}`}
+            >
             <div className="flex items-center justify-between mb-2">
               <h2 className="font-bold text-textprimary text-sm flex items-center gap-2">
                 <Navigation size={14} className="text-primary" /> Route Map
@@ -1202,7 +1224,8 @@ export default function RouteBuilder() {
               addFix={addFix}
               isFullscreen={isFullscreen}
             />
-          </Card>
+            </motion.div>
+          </div>
 
           {/* Navlog table */}
           {navlogError && (

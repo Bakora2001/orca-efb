@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import {
   aircraft as aircraftApi, airports as airportsApi, payload as payloadApi,
-  briefing, getToken, BASE_URL,
+  briefing, weather as weatherApi, getToken, BASE_URL,
   type ApiAircraft, type ApiAirport, type OfpInput, type PayloadResult
 } from '../lib/api'
 import Combobox, { type ComboItem } from '../components/ui/Combobox'
@@ -43,7 +43,7 @@ export default function OfpGenerator() {
   const [destId, setDestId]   = useState('')
   const [altId, setAltId]     = useState('')
   const [alt2Id, setAlt2Id]   = useState('')
-  const [oat, setOat]         = useState<string>('25')
+  const [oat, setOat]         = useState<string>('')
   const [flap, setFlap]       = useState('auto')
   const [depDate, setDepDate] = useState('')
   const [depTime, setDepTime] = useState('')
@@ -103,14 +103,40 @@ export default function OfpGenerator() {
       .finally(() => setLoadingData(false))
   }, [])
 
-  // Auto-set OAT from ISA deviation when departure airport changes
+  // Auto-set OAT from live METAR, or fallback to ISA deviation
   useEffect(() => {
     if (!depId) return
     const ap = apList.find(a => a.id === depId)
-    if (!ap || ap.elevation_ft == null) return
-    // ISA sea-level temp = 15°C, lapse rate = 1.98°C per 1000ft
-    const isaOat = Math.round(15 - (ap.elevation_ft / 1000) * 1.98)
-    setOat(String(isaOat))
+    if (!ap) return
+
+    async function fetchOat() {
+      // ISA sea-level temp = 15°C, lapse rate = 1.98°C per 1000ft
+      const isaOat = ap?.elevation_ft != null ? Math.round(15 - (ap.elevation_ft / 1000) * 1.98) : 25
+
+      if (!ap?.icao) {
+        setOat(String(isaOat))
+        return
+      }
+
+      try {
+        const wx = await weatherApi.get(ap.icao)
+        if (wx.metar) {
+          // Look for temperature/dewpoint block, e.g., " 25/12 " or " M02/M05 "
+          const match = wx.metar.match(/\s(M?\d{2})\/(M?\d{2})?\s/)
+          if (match && match[1]) {
+            let temp = parseInt(match[1].replace('M', '-'), 10)
+            if (!isNaN(temp)) {
+              setOat(String(temp))
+              return
+            }
+          }
+        }
+      } catch {
+        // ignore fetch error and fallback to ISA
+      }
+      setOat(String(isaOat))
+    }
+    fetchOat()
   }, [depId, apList])
 
 
@@ -495,12 +521,12 @@ export default function OfpGenerator() {
               <div className="space-y-4">
                 {/* Weight summary cards */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <SummaryCard label="RTOW" value={fmtKg(previewData.rtow_kg)} sub={`Factor: ${previewData.limiting_factor}`} highlight />
+                  <SummaryCard label="RTOW" value={fmtKg(previewData.rtow_kg)} sub={`Factor: ${previewData.rtow_factor}`} highlight />
                   <SummaryCard label="TOW" value={fmtKg(previewData.tow_kg)} />
                   <SummaryCard label="Max Payload" value={fmtKg(previewData.max_payload_kg)} />
                   <SummaryCard label="ZFW" value={fmtKg(previewData.zfw_kg)} />
                   <SummaryCard label="Trip Dist" value={`${previewData.trip_nm} NM`} />
-                  <SummaryCard label="Max Pax" value={String(previewData.max_pax)} />
+                  <SummaryCard label="Max Pax" value={String(previewData.pax)} />
                 </div>
 
                 {/* Fuel breakdown */}
