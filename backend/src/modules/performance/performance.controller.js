@@ -268,7 +268,7 @@ export const getChartData = asyncHandler(async (req, res) => {
  * onto the scanned chart image and streams the resulting JPEG back.
  */
 export const getChartImage = asyncHandler(async (req, res) => {
-  const { aircraft_id, airport_id, table_type, flap, oat, rtow_kg, factor } = req.query
+  const { aircraft_id, airport_id, table_type, flap, oat, rtow_kg, factor, rwy_m, pa_ft } = req.query
   if (!aircraft_id || !airport_id || !table_type || !flap || oat == null) {
     throw new AppError('aircraft_id, airport_id, table_type, flap, and oat are required', 400)
   }
@@ -325,13 +325,17 @@ export const getChartImage = asyncHandler(async (req, res) => {
     throw new AppError(`Chart asset(s) not found — ${missing.join(', ')}`, 404)
   }
 
+  // Determine effective runway length and elevation: use custom override if provided
+  const finalRwyM   = rwy_m != null ? parseFloat(rwy_m)   : (parseFloat(ap.rwy_m) || 0)
+  const finalElevFt = pa_ft != null ? parseFloat(pa_ft)   : (parseFloat(ap.elevation_ft) || 0)
+
   const payload = {
     cal_path: calPath,
     img_path: imgPath,
     table_type: tableTypeUpper,
     oat: parseFloat(oat),
-    elev_ft: parseFloat(ap.elevation_ft) || 0,
-    rwy_m:   parseFloat(ap.rwy_m) || 0,
+    elev_ft: finalElevFt,
+    rwy_m:   finalRwyM,
     rtow_kg: rtow_kg != null ? parseFloat(rtow_kg) : null,
     factor:  factor  || '-',
     icao:    ap.icao_code || '',
@@ -422,7 +426,8 @@ export const getChartImage = asyncHandler(async (req, res) => {
       }
     } else {
       console.error(`[chart-image] ${pythonCmd} draw_trace.py failed:`, err1.message)
-      throw new AppError(`Chart render failed: ${err1.message}`, 500)
+      const isValErr = err1.message.includes('out of calibration range') || err1.message.includes('could not be resolved from calibration data')
+      throw new AppError(`Chart render failed: ${err1.message}`, isValErr ? 400 : 500)
     }
   }
 

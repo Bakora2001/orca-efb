@@ -91,111 +91,6 @@ def evaluate_quadratic(coefs, x):
     return a * x * x + b * x + c
 
 
-def get_calibrated_oat_x(temp_points, oat):
-    pts = sorted(temp_points, key=lambda p: float(p["value"]))
-    oat = float(oat)
-    
-    # Fail if out of bounds
-    if oat < float(pts[0]["value"]) or oat > float(pts[-1]["value"]):
-        sys.stderr.write(f"OAT {oat:g}°C is out of calibration range [{pts[0]['value']:g}, {pts[-1]['value']:g}]\n")
-        sys.exit(1)
-        
-    for lo, hi in zip(pts, pts[1:]):
-        lo_v = float(lo["value"])
-        hi_v = float(hi["value"])
-        if lo_v <= oat <= hi_v:
-            # Surrounding 1°C graduations inside this 10°C interval
-            t_low = float(int(oat))
-            if t_low == hi_v:
-                t_low = hi_v - 1.0
-            t_high = t_low + 1.0
-            
-            # Interpolate to find x for t_low and t_high assuming uniform spacing inside [lo_v, hi_v]
-            x_low = float(lo["x_px"]) + (t_low - lo_v) * (float(hi["x_px"]) - float(lo["x_px"])) / (hi_v - lo_v)
-            x_high = float(lo["x_px"]) + (t_high - lo_v) * (float(hi["x_px"]) - float(lo["x_px"])) / (hi_v - lo_v)
-            
-            # Interpolate OAT within the [t_low, t_high] 1°C interval
-            frac = (oat - t_low) / (t_high - t_low)
-            return x_low + frac * (x_high - x_low)
-            
-    sys.stderr.write(f"OAT {oat:g}°C could not be derived from calibration data\n")
-    sys.exit(1)
-
-
-def get_calibrated_runway_y(distance_points, rwy_m):
-    pts = sorted(distance_points, key=lambda p: float(p["value"]))
-    rwy_m = float(rwy_m)
-    
-    val_min = float(pts[0]["value"]) * 100.0
-    val_max = float(pts[-1]["value"]) * 100.0
-    
-    # Fail if out of bounds
-    if rwy_m < val_min or rwy_m > val_max:
-        sys.stderr.write(f"Runway length {rwy_m:g}m is out of calibration range [{val_min:g}, {val_max:g}]\n")
-        sys.exit(1)
-        
-    for lo, hi in zip(pts, pts[1:]):
-        lo_v = float(lo["value"]) * 100.0
-        hi_v = float(hi["value"]) * 100.0
-        if lo_v <= rwy_m <= hi_v:
-            # Surrounding 25m graduations inside this 100m interval
-            d_low = float((int(rwy_m) // 25) * 25)
-            if d_low == hi_v:
-                d_low = hi_v - 25.0
-            d_high = d_low + 25.0
-            
-            # Interpolate to find y for d_low and d_high assuming uniform spacing inside [lo_v, hi_v]
-            y_low = float(lo["y_px"]) + (d_low - lo_v) * (float(hi["y_px"]) - float(lo["y_px"])) / (hi_v - lo_v)
-            y_high = float(lo["y_px"]) + (d_high - lo_v) * (float(hi["y_px"]) - float(lo["y_px"])) / (hi_v - lo_v)
-            
-            # Interpolate runway length within the [d_low, d_high] 25m interval
-            frac = (rwy_m - d_low) / (d_high - d_low)
-            return y_low + frac * (y_high - y_low)
-            
-    sys.stderr.write(f"Runway length {rwy_m:g}m could not be derived from calibration data\n")
-    sys.exit(1)
-
-
-def get_calibrated_runway_m_from_y(distance_points, target_y_px):
-    pts = sorted(distance_points, key=lambda p: float(p["value"]))
-    target_y_px = float(target_y_px)
-    
-    y_max_val = float(pts[0]["y_px"]) # y corresponding to min value (400m)
-    y_min_val = float(pts[-1]["y_px"]) # y corresponding to max value (2300m)
-    
-    # Fail if out of bounds
-    if target_y_px > y_max_val or target_y_px < y_min_val:
-        sys.stderr.write(f"Distance axis Y pixel {target_y_px:g} is out of calibration range [{y_min_val:g}, {y_max_val:g}]\n")
-        sys.exit(1)
-        
-    for lo, hi in zip(pts, pts[1:]):
-        lo_y = float(lo["y_px"])
-        hi_y = float(hi["y_px"])
-        # Since y decreases as value increases:
-        if hi_y <= target_y_px <= lo_y:
-            lo_v = float(lo["value"]) * 100.0
-            hi_v = float(hi["value"]) * 100.0
-            
-            grad_y = []
-            for k in range(5):
-                val = lo_v + k * 25
-                frac_val = (val - lo_v) / (hi_v - lo_v)
-                y_val = lo_y + frac_val * (hi_y - lo_y)
-                grad_y.append((val, y_val))
-            
-            for k in range(4):
-                val_lo, y_lo = grad_y[k]
-                val_hi, y_hi = grad_y[k+1]
-                if y_hi <= target_y_px <= y_lo:
-                    if y_lo == y_hi:
-                        return val_lo
-                    frac = (target_y_px - y_lo) / (y_hi - y_lo)
-                    return val_lo + frac * 25.0
-                    
-    sys.stderr.write(f"Distance axis Y pixel {target_y_px:g} could not be resolved from calibration data\n")
-    sys.exit(1)
-
-
 def _chart_grid_major_y_spacing(cal):
     grid_y = (cal.get("grid") or {}).get("major_y_px") or []
     diffs = [
@@ -530,7 +425,10 @@ def main():
     ref1_x = cal["reference_lines"]["temperature_to_weight_reference_x_px"]
     color = (190, 35, 215, 230) if table_type == "TODA" else (10, 88, 210, 230)
     
-    # No header banner — clean chart view
+    # Premium high-res header banner
+    title = f"DASH 8 AFM NOMOGRAPH OVERLAY Solution [{table_type}]"
+    draw.rectangle([20, 20, 20 + len(title) * 22, 80], fill=(255, 255, 255, 240), outline=color, width=3)
+    draw.text((35, 30), title, fill=color, font=font_large)
 
     def family_points(name):
         return sorted(
@@ -600,30 +498,8 @@ def main():
         for lo, hi in zip(temp_cps, temp_cps[1:]):
             lo_x, hi_x = float(lo["x_px"]), float(hi["x_px"])
             if lo_x <= x <= hi_x:
-                lo_v = float(lo["value"])
-                hi_v = float(hi["value"])
-                
-                # We divide this interval into 1°C graduations:
-                # The total interval is [lo_v, hi_v], which is a 10°C span.
-                # Let's calculate the x-pixel value for each graduation:
-                grad_x = []
-                steps = int(hi_v - lo_v)
-                for k in range(steps + 1):
-                    val = lo_v + k
-                    frac_val = (val - lo_v) / (hi_v - lo_v)
-                    x_val = lo_x + frac_val * (hi_x - lo_x)
-                    grad_x.append((val, x_val))
-                
-                # Now find which subdivision bounds x
-                for k in range(steps):
-                    val_lo, x_lo = grad_x[k]
-                    val_hi, x_hi = grad_x[k+1]
-                    if x_lo <= x <= x_hi:
-                        # Interpolate inside this 1°C interval
-                        if x_lo == x_hi:
-                            return val_lo
-                        frac = (x - x_lo) / (x_hi - x_lo)
-                        return val_lo + frac
+                frac = 0 if hi_x == lo_x else (x - lo_x) / (hi_x - lo_x)
+                return float(lo["value"]) + frac * (float(hi["value"]) - float(lo["value"]))
         return float(temp_cps[-1]["value"])
 
     def pressure_altitude_feed_ft(altitude_ft, oat_c):
@@ -802,8 +678,6 @@ def main():
         return smoothed
 
     def truncate_curve_at_y(path, target_y):
-        """Truncate a path at target_y.  If the curve never crosses target_y,
-        return the rightmost x so callers never receive None for solve_x."""
         if not path:
             return None, []
         target_y = float(target_y)
@@ -818,8 +692,7 @@ def main():
                 out.append((x, target_y))
                 return x, out
             out.append(p2)
-        # Curve never reached target_y — return the full path and last x
-        return float(path[-1][0]), path
+        return None, path
 
     def cubic_bezier(p0, p1, p2, p3, samples=72):
         pts = []
@@ -1074,182 +947,49 @@ def main():
         red_candidate_cache[cache_key] = candidates
         return candidates
 
-    def nearest_red_weight_curve_to_distance(start_x, start_y, end_x, target_y, slope_hint, bounds, rtow_solve_x=None):
-        """
-        Trace an interpolated weight-family corridor between the two surrounding
-        printed Boeing curves.  At every x position the plotted y is held at the
-        same constant fractional distance between the two bounding curves, giving
-        identical curvature, direction, radius, and tangent as the neighbours.
-        """
+    def nearest_red_weight_curve_to_distance(start_x, start_y, end_x, target_y, slope_hint, bounds):
         step = 8.0
         start_x = float(start_x)
-        end_x   = float(end_x)
+        end_x = float(end_x)
         start_y = float(start_y)
         target_y = float(target_y)
-        trace_end_x = float(bounds.get("x1", end_x))
-
-        # ── helper: trace ONE printed red curve from its seed y ──────────────────
-        def trace_one(seed_y, sl):
-            path = [(start_x, float(seed_y))]
-            prev_y = float(seed_y)
-            local_slope = float(sl)
-            x = start_x + step
-            misses = 0
-            while x <= trace_end_x + 0.1:
-                cands = red_pixel_candidates_at_x(x, bounds, window_px=3)
-                predicted = prev_y + local_slope * step
-                if cands:
-                    chosen = min(cands, key=lambda y: abs(float(y) - predicted))
-                    if abs(chosen - predicted) > 55:
-                        chosen = predicted
-                        misses += 1
-                    else:
-                        measured = (chosen - prev_y) / step
-                        if -0.8 < measured < 0.2:
-                            local_slope = 0.78 * local_slope + 0.22 * measured
-                        misses = 0
-                else:
-                    chosen = predicted
-                    misses += 1
-                path.append((x, float(chosen)))
-                prev_y = float(chosen)
-                if misses > 8:
-                    break
-                x += step
-            return path
-
-        # ── helper: linear y interpolation along any traced path ─────────────────
-        def y_at(path, tx):
-            tx = float(tx)
-            if tx <= float(path[0][0]):
-                return float(path[0][1])
-            for p1, p2 in zip(path, path[1:]):
-                x1, y1 = float(p1[0]), float(p1[1])
-                x2, y2 = float(p2[0]), float(p2[1])
-                if x1 <= tx <= x2 and x2 != x1:
-                    return y1 + (tx - x1) / (x2 - x1) * (y2 - y1)
-            return float(path[-1][1])
-
-        # ── 1. Identify seeds for the two bounding Boeing weight curves ───────────
-        candidates = sorted(red_pixel_candidates_at_x(start_x, bounds, window_px=3))
+        candidates = red_pixel_candidates_at_x(start_x, bounds, window_px=3)
         if not candidates:
             return None, []
-
-        seed_above = None   # printed curve just above start_y (smaller y-pixel)
-        seed_below = None   # printed curve just below start_y (larger y-pixel)
-        for c in reversed(candidates):
-            if c <= start_y:
-                seed_above = c
+        base_y = min(candidates, key=lambda y: abs(float(y) - start_y))
+        offset = start_y - base_y
+        base_path = [(start_x, base_y)]
+        prev_y = base_y
+        local_slope = -0.12
+        x = start_x + step
+        misses = 0
+        while x <= end_x + 0.1:
+            candidates = red_pixel_candidates_at_x(x, bounds, window_px=3)
+            predicted = prev_y + local_slope * step
+            if candidates:
+                chosen = min(candidates, key=lambda y: abs(float(y) - predicted))
+                if abs(chosen - predicted) > 55:
+                    chosen = predicted
+                    misses += 1
+                else:
+                    measured = (chosen - prev_y) / step
+                    if -0.8 < measured < 0.2:
+                        local_slope = 0.78 * local_slope + 0.22 * measured
+                    misses = 0
+            else:
+                chosen = predicted
+                misses += 1
+            base_path.append((x, float(chosen)))
+            prev_y = float(chosen)
+            if misses > 8:
                 break
-        for c in candidates:
-            if c >= start_y:
-                seed_below = c
-                break
-
-        # ── 2. Trace both bounding curves and build interpolated corridor path ────
-        # Derive local slope for each seed from the very next x column
-        def local_slope_for_seed(seed_y):
-            """One-step look-ahead to get the actual local tangent of this printed curve."""
-            nx = start_x + step
-            cands_next = red_pixel_candidates_at_x(nx, bounds, window_px=6)
-            if cands_next:
-                # pick the candidate closest to where the seed would predict
-                predicted = seed_y + slope_hint * step
-                nearest = min(cands_next, key=lambda y: abs(float(y) - predicted))
-                if abs(nearest - predicted) < 40:
-                    return (nearest - seed_y) / step
-            return slope_hint
-
-        if seed_above is not None and seed_below is not None and seed_below != seed_above:
-            sl_above = local_slope_for_seed(seed_above)
-            sl_below = local_slope_for_seed(seed_below)
-            path_above = trace_one(seed_above, sl_above)
-            path_below = trace_one(seed_below, sl_below)
-
-            if len(path_above) < 3 or len(path_below) < 3:
-                return None, []
-
-            span = seed_below - seed_above
-            # q: 0 = on lower curve, 1 = on upper curve
-            q = (seed_below - start_y) / span
-
-            # Build corridor: at every x stamp, y = yb - q*(yb-ya)
-            interp_path = []
-            for xi, ya_i in path_above:
-                yb_i = y_at(path_below, xi)
-                interp_path.append((xi, yb_i - q * (yb_i - ya_i)))
-            interp_path[0] = (start_x, start_y)
-
-        else:
-            # Only one boundary found — shift the single curve
-            seed = seed_above if seed_above is not None else seed_below
-            if seed is None:
-                return None, []
-            base = trace_one(seed, slope_hint)
-            if len(base) < 5:
-                return None, []
-            offset = start_y - seed
-            interp_path = [(px, py + offset) for px, py in base]
-            interp_path[0] = (start_x, start_y)
-
-        if len(interp_path) < 3:
+            x += step
+        if len(base_path) < 3:
             return None, []
-
-        # ── 3. Smooth the corridor path to 1px density with Hermite-blended Gaussian filter ──
-        # This resamples the 8px-step path to a dense 1px grid, applies a Gaussian moving
-        # average to remove all facet points, and blends with a quartic bump function
-        # to guarantee C^1 tangent continuity and exactness at the endpoints.
-        def smooth_path_dense(pts, half_w=15):
-            x_start = float(pts[0][0])
-            x_end = float(pts[-1][0])
-            if x_end - x_start < 2.0:
-                return pts
-            
-            # Resample to dense 1px steps in X
-            dense = []
-            curr_x = x_start
-            while curr_x < x_end:
-                dense.append((curr_x, y_at(pts, curr_x)))
-                curr_x += 1.0
-            dense.append((x_end, float(pts[-1][1])))
-            
-            # Apply Gaussian moving average
-            n = len(dense)
-            weights = [2.718281828 ** (-0.5 * (k / (half_w / 2.0)) ** 2) for k in range(-half_w, half_w + 1)]
-            w_sum = sum(weights)
-            weights = [w / w_sum for w in weights]
-            
-            smoothed_ys = []
-            for i in range(n):
-                acc = 0.0
-                for j, w in enumerate(weights):
-                    idx = max(0, min(n - 1, i + j - half_w))
-                    acc += w * float(dense[idx][1])
-                smoothed_ys.append(acc)
-                
-            # Blend with raw using quartic bump function 16 * t^2 * (1-t)^2
-            blended = []
-            for i in range(n):
-                x = dense[i][0]
-                y_raw = dense[i][1]
-                y_sm = smoothed_ys[i]
-                t = (x - x_start) / (x_end - x_start)
-                w_blend = 16.0 * (t ** 2) * ((1.0 - t) ** 2)
-                y_final = y_raw + w_blend * (y_sm - y_raw)
-                blended.append((x, y_final))
-            return blended
-
-        interp_path = smooth_path_dense(interp_path)
-
-        # ── 4. Solve for the stopping point ──────────────────────────────────────
-        if rtow_solve_x is not None:
-            sx = float(rtow_solve_x)
-            y_val = y_at(interp_path, sx)
-            truncated = [p for p in interp_path if float(p[0]) < sx]
-            truncated.append((sx, y_val))
-            return sx, truncated
-        else:
-            return truncate_curve_at_y(interp_path, target_y)
+        shifted = [(x, y + offset) for x, y in base_path]
+        shifted[0] = (start_x, start_y)
+        shifted = _smooth_weight_curve_entry(shifted, target_y, local_slope)
+        return truncate_curve_at_y(shifted, target_y)
 
     def weight_family_slope(points):
         configured = cal["curve_families"]["weight_family_curves"].get("parallel_slope_dy_dx")
@@ -1289,11 +1029,11 @@ def main():
 
     runway_key = f"{table_type.lower()}_runway_m_used"
     distance_100m = rwy_m / 100.0
-    temp_x = get_calibrated_oat_x(temp_points, oat)
+    temp_x = interp_control_point(temp_points, oat, "x_px")
     reviewed_runway_y = _locked_chart_runway_y_px(cal, icao, elev_ft)
     dist_y = reviewed_runway_y
     if dist_y is None:
-        dist_y = get_calibrated_runway_y(distance_points, rwy_m)
+        dist_y = interp_control_point(distance_points, distance_100m, "y_px")
     # Fit the airfield altitude curves and generate the curved trajectory
     fitted_curves = fit_pressure_altitude_curves(cal)
     start_curve_x = float(temp_points[0]["x_px"])
@@ -1325,65 +1065,89 @@ def main():
         sys.stderr.write("Weight slope too shallow\n")
         sys.exit(1)
 
-    # ── WEIGHT PANEL CURVE SOLVING & TRACING (Request 1 & 5) ──
-    # We call nearest_red_weight_curve_to_distance to trace the nearest red curve,
-    # fit a quadratic to it, shift it to start at ref_y, solve for the runway intersection,
-    # and return the smooth curve path.
-    
-    rtow_solve_x = None
-    if rtow_kg is not None:
-        rtow_solve_x = interp_control_point(weight_points, float(rtow_kg), "x_px")
-        rtow_solve_x = max(min_weight_x, min(max_weight_x, rtow_solve_x))
-
     weight_bounds = cal["curve_families"]["weight_family_curves"].get("panel_bounds_px", {})
-
+    straight_solve_x = ref1_x + ((dist_y - ref_y) / weight_slope)
+    straight_solve_x = max(min_weight_x, min(max_weight_x, straight_solve_x))
+    
     solve_x, weight_curve_pts = nearest_red_weight_curve_to_distance(
-        ref1_x, ref_y, max_weight_x, dist_y, weight_slope, weight_bounds, rtow_solve_x=rtow_solve_x
+        ref1_x, ref_y, max_weight_x, dist_y, weight_slope, weight_bounds
     )
-
-    if not weight_curve_pts:
-        # Fallback if tracer fails
-        if rtow_solve_x is not None:
-            solve_x = rtow_solve_x
-            dist_y = ref_y + weight_slope * (solve_x - ref1_x)
+    
+    curve_end_y = dist_y
+    if solve_x is None:
+        if len(weight_curve_pts) >= 2:
+            solve_x, weight_curve_pts = extend_overlay_curve_to_runway(
+                weight_curve_pts, dist_y, straight_solve_x, max_weight_x,
+                weight_slope, cal["curve_families"]["weight_family_curves"]
+            )
+            curve_end_y = dist_y if solve_x is not None else float(weight_curve_pts[-1][1])
         else:
-            solve_x = ref1_x + ((dist_y - ref_y) / weight_slope)
-            solve_x = max(min_weight_x, min(max_weight_x, solve_x))
-        weight_curve_pts = reviewed_weight_family_path(ref1_x, ref_y, solve_x, dist_y, oat_c=oat)
-    else:
-        # If tracer succeeded, dist_y is the endpoint of the curve
-        dist_y = float(weight_curve_pts[-1][1])
+            solve_x = straight_solve_x
+            weight_curve_pts = calibrated_weight_family_bezier(
+                ref1_x, ref_y, solve_x, dist_y, weight_slope,
+                cal["curve_families"]["weight_family_curves"]
+            )
 
-    # Apply manual calibration locks if present
+    if solve_x is None:
+        solve_x = straight_solve_x
+        weight_curve_pts = [(ref1_x, ref_y), (solve_x, dist_y)]
+
+    solve_x = max(min_weight_x, min(max_weight_x, solve_x))
+
     locked_solve_x = _locked_chart_weight_x_px(cal, oat, icao, elev_ft)
     if locked_solve_x is not None:
         solve_x = locked_solve_x
-        # Re-evaluate dist_y from the curve or fallback
-        s_x, pts = nearest_red_weight_curve_to_distance(
-            ref1_x, ref_y, max_weight_x, dist_y, weight_slope, weight_bounds, rtow_solve_x=locked_solve_x
-        )
-        if pts:
-            weight_curve_pts = pts
-            dist_y = float(weight_curve_pts[-1][1])
-        else:
-            dist_y = ref_y + weight_slope * (solve_x - ref1_x)
-            weight_curve_pts = reviewed_weight_family_path(ref1_x, ref_y, solve_x, dist_y, oat_c=oat)
+    elif rtow_kg is not None:
+        solve_x = interp_control_point(weight_points, float(rtow_kg), "x_px")
+        solve_x = max(min_weight_x, min(max_weight_x, solve_x))
 
-    # Guard against None solve_x (can happen if curve never reaches target_y)
-    if solve_x is None:
-        if rtow_solve_x is not None:
-            solve_x = rtow_solve_x
-        else:
-            solve_x = ref1_x + ((dist_y - ref_y) / weight_slope) if abs(weight_slope) > 0.001 else max_weight_x
-    solve_x = max(min_weight_x, min(max_weight_x, float(solve_x)))
+    # ── Recompute dist_y from the envelope when solve_x is known (Reverse Mode) ──
+    # If rtow_kg was provided we know the exact weight (solve_x) and we must
+    # find the y-coordinate where the weight-curve at that solve_x crosses the
+    # runway-length axis.  We do this by:
+    #  1. Computing q (fractional height) at (ref1_x, ref_y) from the envelope
+    #  2. Using y_from_envelope at solve_x with the same q to get dist_y
+    # This makes the horizontal line accurate in "reverse" mode and ensures the
+    # vertical drop reads the correct runway-length value on the distance axis.
+    if rtow_kg is not None:
+        env_at_ref = envelope_at(weight_family, ref1_x)
+        if env_at_ref is not None:
+            span_ref = float(env_at_ref["y_max_px"]) - float(env_at_ref["y_min_px"])
+            if span_ref > 1.0:
+                q_ref = max(0.0, min(1.0, (float(env_at_ref["y_max_px"]) - ref_y) / span_ref))
+                env_at_solve = envelope_at(weight_family, solve_x)
+                if env_at_solve is not None:
+                    span_solve = float(env_at_solve["y_max_px"]) - float(env_at_solve["y_min_px"])
+                    if span_solve > 1.0:
+                        dist_y_envelope = float(env_at_solve["y_max_px"]) - q_ref * span_solve
+                        dist_y = dist_y_envelope
+
     curve_end_y = dist_y
+    weight_curve_pts = reviewed_weight_family_path(ref1_x, ref_y, solve_x, dist_y, oat_c=oat)
 
     solved_weight = interp_control_point(
         [{"value": p["x_px"], "kg": p["value"]} for p in weight_points],
         solve_x, "kg"
     )
 
-    solved_distance_m = get_calibrated_runway_m_from_y(distance_points, dist_y)
+    # Reverse-interpolate the distance axis: given dist_y (y_px), find distance in metres
+    def dist_m_from_y(target_y_px):
+        pts = sorted(distance_points, key=lambda p: float(p["y_px"]))
+        target_y_px = float(target_y_px)
+        if not pts:
+            return rwy_m
+        if target_y_px <= float(pts[0]["y_px"]):
+            return float(pts[0]["value"]) * 100.0
+        if target_y_px >= float(pts[-1]["y_px"]):
+            return float(pts[-1]["value"]) * 100.0
+        for lo, hi in zip(pts, pts[1:]):
+            lo_y, hi_y = float(lo["y_px"]), float(hi["y_px"])
+            if lo_y <= target_y_px <= hi_y and hi_y != lo_y:
+                frac = (target_y_px - lo_y) / (hi_y - lo_y)
+                return (float(lo["value"]) + frac * (float(hi["value"]) - float(lo["value"]))) * 100.0
+        return float(pts[-1]["value"]) * 100.0
+
+    solved_distance_m = dist_m_from_y(dist_y)
 
     reviewed_limit = _locked_chart_limit_kg(cal, oat, icao, elev_ft)
     if reviewed_limit is not None:
@@ -1393,50 +1157,158 @@ def main():
     distance_axis_x = float(distance_points[0]["x_px"])
 
     # ── Step-by-step drawing matching the AFM ASDA/TODA backplot procedure ─────
-    # Lines are thin (width=2) and no text labels overlay the chart.
-    # Small intersection dots mark each key point.
+    #
+    # Step 1: Vertical OAT line  →  from OAT axis (bottom) upward to PA curve
+    # Step 2: Horizontal transfer →  from (OAT x, PA y) right to reference line
+    # Step 3: Weight-family curve →  from reference line down to runway length y
+    # Step 4: Horizontal line     →  from intersection leftward to distance axis
+    # Step 5: Vertical drop       →  from (solve_x, runway_y) down to weight axis
 
-    LINE_W = 2   # thin engineering line
-    DOT_R  = 5   # small intersection dot radius
-
-    def draw_dot(draw_obj, pt, clr, r=DOT_R):
+    # Helper: draw a step-number badge (circle with digit) and an inline value callout
+    def draw_step_badge_with_callout(draw_obj, pt, step_num, label_text, color, font, font_large, align="right"):
         px, py = int(round(pt[0])), int(round(pt[1]))
-        draw_obj.ellipse([px - r, py - r, px + r, py + r], fill=clr)
+        r = 24
+        
+        # Draw bold circle
+        draw_obj.ellipse([px - r, py - r, px + r, py + r],
+                         fill=color, outline=(255, 255, 255, 255), width=3)
+        
+        # Center number inside circle
+        txt = str(step_num)
+        try:
+            left, top, right, bottom = draw_obj.textbbox((0, 0), txt, font=font_badge)
+            tw = right - left
+            th = bottom - top
+        except AttributeError:
+            tw, th = draw_obj.textsize(txt, font=font_badge)
+        
+        tx = px - tw // 2
+        ty = py - th // 2 - 2
+        draw_obj.text((tx, ty), txt, fill=(255, 255, 255, 255), font=font_badge)
 
-    # ── Step 1: Pressure-altitude curve & OAT vertical line ─────────────────────
+        # Draw callout box for the value
+        if not label_text:
+            return
+
+        try:
+            left, top, right, bottom = draw_obj.textbbox((0, 0), label_text, font=font)
+            lw = right - left
+            lh = bottom - top
+        except AttributeError:
+            lw, lh = draw_obj.textsize(label_text, font=font)
+
+        pad_x, pad_y = 12, 8
+        box_w = lw + 2 * pad_x
+        box_h = lh + 2 * pad_y
+
+        # Determine horizontal placement
+        if align == "left":
+            bx = px - box_w - 35
+        else:
+            bx = px + 35
+        by = py - box_h // 2
+
+        # Draw clean background panel
+        draw_obj.rectangle(
+            [bx, by, bx + box_w, by + box_h],
+            fill=(255, 255, 255, 240),
+            outline=color,
+            width=2
+        )
+        draw_obj.text((bx + pad_x, by + pad_y), label_text, fill=color, font=font)
+
+    # Helper: draw a filled dot
+    def draw_dot(draw_obj, pt, color, r=8):
+        px, py = int(round(pt[0])), int(round(pt[1]))
+        draw_obj.ellipse([px - r, py - r, px + r, py + r],
+                         fill=color, outline=(255, 255, 255, 255), width=3)
+
+    # ── Step 1: Airfield altitude curve tracing & OAT vertical drop ─────────────
+    # We draw the curved path matching the pressure altitude family from the left
+    # edge to the intersection, and a vertical drop to mark OAT.
     pa_scaled = [sp(p) for p in pa_curve_pts] if pa_curve_pts else []
     if pa_scaled:
-        draw.line(pa_scaled, fill=color, width=LINE_W)
+        draw.line(pa_scaled, fill=color, width=5)
 
     step1_start = sp((temp_x, bottom_y))
     step1_end   = sp((temp_x, pressure_y))
-    draw.line([step1_start, step1_end], fill=color, width=LINE_W)
+    draw.line([step1_start, step1_end], fill=color, width=5)
 
     # ── Step 2: Horizontal transfer — PA intersection → reference line ──────────
-    pa_intersect  = sp((temp_x,  pressure_y))
-    ref_intersect = sp((ref1_x,  pressure_y))
-    draw.line([pa_intersect, ref_intersect], fill=color, width=LINE_W)
+    pa_intersect = sp((temp_x, pressure_y))
+    ref_intersect = sp((ref1_x, pressure_y))
+    draw.line([pa_intersect, ref_intersect], fill=color, width=6)
 
-    # ── Step 3: Weight-family curve — reference line → runway-length y ──────────
-    wt_scaled = [sp(p) for p in weight_curve_pts]
+    # ── Step 3: Weight-family curve — reference line → runway length ────────────
+    wt_pts = [(ref1_x, ref_y)] + list(weight_curve_pts[1:])
+    wt_scaled = [sp(p) for p in wt_pts]
+
+    sys.stderr.write(f'COORDS: ref1_x={ref1_x} ref_y={ref_y} solve_x={solve_x} dist_y={dist_y}\n')
+    sys.stderr.write(f'STEP3: wt_pts[0]={wt_pts[0]} wt_pts[-1]={wt_pts[-1]} len={len(wt_pts)}\n')
+    img_w, img_h = img.size
+    sys.stderr.write(f'IMG size: {img_w}x{img_h}\n')
+    sys.stderr.write(f'bounds: {bounds}\n')
     if len(wt_scaled) > 1:
-        draw.line(wt_scaled, fill=color, width=LINE_W)
+        draw.line(wt_scaled, fill=color, width=5)
 
-    # ── Step 4: Horizontal line — distance axis ↔ weight-curve intersection ─────
+    # ── Step 4: Horizontal line — distance axis → weight-curve intersection ────
     rwy_left  = sp((distance_axis_x, dist_y))
     rwy_right = sp((solve_x,         dist_y))
-    draw.line([rwy_left, rwy_right], fill=color, width=LINE_W)
+    draw.line([rwy_left, rwy_right], fill=color, width=5)
 
     # ── Step 5: Vertical drop — curve end → weight axis (bottom) ────────────────
     actual_curve_end_y = float(weight_curve_pts[-1][1]) if weight_curve_pts else dist_y
     drop_top    = sp((solve_x, actual_curve_end_y))
     drop_bottom = sp((solve_x, bottom_y))
-    draw.line([drop_top, drop_bottom], fill=color, width=LINE_W)
+    draw.line([drop_top, drop_bottom], fill=color, width=5)
 
-    # ── Intersection dots — every key turning point ───────────────────────────
+    # ── Step Badges and Callout Labels ──────────────────────────────────────────
+    # Point 1 (Start of pressure altitude curve at left boundary)
     curve_start_pt = pa_scaled[0] if pa_scaled else step1_start
-    for pt in (curve_start_pt, step1_end, ref_intersect, drop_top, drop_bottom, rwy_left):
-        draw_dot(draw, pt, color)
+    draw_step_badge_with_callout(draw, curve_start_pt, 1, f"Alt: {round(elev_ft):,} ft", color, font, font_large, align="right")
+    
+    # Point 2 (PA Curve intersection with vertical OAT line)
+    draw_step_badge_with_callout(draw, step1_end, 2, f"OAT: {oat:g}°C", color, font, font_large, align="right")
+    
+    # Point 3 (Reference Line intersection)
+    draw_step_badge_with_callout(draw, ref_intersect, 3, "", color, font, font_large, align="right")
+    
+    # Point 4 (Runway Length intersection)
+    draw_step_badge_with_callout(draw, drop_top, 4, f"Runway req: {round(solved_distance_m):,} m", color, font, font_large, align="left")
+    
+    # Point 5 (RTOW Axis End)
+    draw_step_badge_with_callout(draw, drop_bottom, 5, f"RTOW: {round(solved_weight):,} kg", color, font, font_large, align="right")
+
+    # Dot at distance axis intersection (runway length reading)
+    draw_dot(draw, rwy_left, color, r=8)
+
+    # ── Large Bottom Banner ──────────────────────────────────────────────────────
+    label = (
+        f"  OAT {oat:g}°C  |  Alt {round(elev_ft):,} ft  |  "
+        f"RTOW {round(solved_weight):,} kg  |  RWY req {round(solved_distance_m):,} m  |  "
+        f"{table_type}  |  {factor}  "
+    )
+    lx, ly = drop_bottom
+    try:
+        left, top, right, bottom = draw.textbbox((0, 0), label, font=font_large)
+        lw = right - left
+        lh = bottom - top
+    except AttributeError:
+        lw, lh = draw.textsize(label, font=font_large)
+        
+    label_w = lw + 24
+    label_h = lh + 16
+    label_x = min(max(lx + 25, 30), max(30, image.width - label_w - 30))
+    label_y = max(30, ly - label_h - 20)
+    
+    # Large high-contrast background banner
+    draw.rectangle(
+        [label_x, label_y, label_x + label_w, label_y + label_h],
+        fill=(255, 255, 255, 245),
+        outline=color,
+        width=3
+    )
+    draw.text((label_x + 12, label_y + 8), label, fill=color, font=font_large)
 
     # Write output to stdout in raw JPEG format
     out = io.BytesIO()
