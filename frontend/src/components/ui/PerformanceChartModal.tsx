@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  X, Activity, TrendingDown, AlertTriangle, Info, BarChart2, FileImage, ZoomIn, ZoomOut, RotateCcw
+  X, Activity, TrendingDown, AlertTriangle, Info, BarChart2, FileImage, ZoomIn, ZoomOut, RotateCcw, Download
 } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -582,7 +582,45 @@ function AfmChartTab({ params, chartData }: { params: ChartModalParams; chartDat
   )
   const [zoom, setZoom] = useState(1)
 
-  // Blob URL state — one per chart type
+  // Parameters editing states
+  const [mode, setMode]                 = useState<'forward' | 'reverse'>('forward')
+  const [customRwy, setCustomRwy]       = useState<string>('')
+  const [customWeight, setCustomWeight] = useState<string>('')
+  const [customOat, setCustomOat]       = useState<string>('')
+  const [customElev, setCustomElev]     = useState<string>('')
+
+  // Sync inputs with defaults from params / chartData
+  const defaultRwyM = chartData?.airport?.rwy_m ? String(Math.round(chartData.airport.rwy_m)) : ''
+  const defaultWeightKg = params.rtow_kg ? String(Math.round(params.rtow_kg)) : ''
+  const defaultOat = params.oat != null ? String(params.oat) : ''
+  const defaultElevFt = chartData?.airport?.elevation_ft != null ? String(Math.round(chartData.airport.elevation_ft)) : ''
+
+  useEffect(() => {
+    if (defaultRwyM) setCustomRwy(defaultRwyM)
+  }, [defaultRwyM])
+
+  useEffect(() => {
+    if (defaultWeightKg) setCustomWeight(defaultWeightKg)
+  }, [defaultWeightKg])
+
+  useEffect(() => {
+    if (defaultOat) setCustomOat(defaultOat)
+  }, [defaultOat])
+
+  useEffect(() => {
+    if (defaultElevFt) setCustomElev(defaultElevFt)
+  }, [defaultElevFt])
+
+  // Reset parameters back to EFB defaults
+  const handleResetParams = () => {
+    setMode('forward')
+    setCustomRwy(defaultRwyM)
+    setCustomWeight(defaultWeightKg)
+    setCustomOat(defaultOat)
+    setCustomElev(defaultElevFt)
+  }
+
+  // Blob URL state — one per chart type/condition
   const [blobUrls, setBlobUrls]   = useState<Record<string, string>>({})
   const [loading, setLoading]     = useState<Record<string, boolean>>({})
   const [errors, setErrors]       = useState<Record<string, string | null>>({})
@@ -592,11 +630,16 @@ function AfmChartTab({ params, chartData }: { params: ChartModalParams; chartDat
     ? params.flap.replace(/[^0-9]/g, '')
     : (chartData?.flap ?? '0').replace(/[^0-9]/g, '')
 
-  const rtow   = params.rtow_kg ?? null
+  const activeRwy = mode === 'forward' && customRwy !== '' ? parseFloat(customRwy) : null
+  const activeWeight = mode === 'reverse' && customWeight !== '' ? parseFloat(customWeight) : null
+  const activeOat = customOat !== '' ? parseFloat(customOat) : params.oat
+  const activeElev = customElev !== '' ? parseFloat(customElev) : null
+
+  const rtow = activeWeight ?? params.rtow_kg ?? null
   const factor = params.factor  ?? null
 
-  // Key uniquely identifies this chart (type + conditions)
-  const imgKey = (tt: string) => `${tt}-${effectiveFlap}-${params.oat}-${rtow}`
+  // Key uniquely identifies this chart (type + conditions + params)
+  const imgKey = (tt: string) => `${tt}-${effectiveFlap}-${activeOat}-${activeElev ?? ''}-${activeRwy ?? ''}-${activeWeight ?? ''}`
 
   // Fetch authenticated image blob for a given table type
   useEffect(() => {
@@ -609,8 +652,10 @@ function AfmChartTab({ params, chartData }: { params: ChartModalParams; chartDat
       airport_id:  params.airport_id,
       table_type:  selectedType,
       flap:        effectiveFlap,
-      oat:         params.oat,
-      rtow_kg:     rtow,
+      oat:         activeOat,
+      rtow_kg:     activeWeight,
+      rwy_m:       activeRwy,
+      pa_ft:       activeElev,
       factor,
     })
 
@@ -626,7 +671,7 @@ function AfmChartTab({ params, chartData }: { params: ChartModalParams; chartDat
       })
       .finally(() => setLoading(prev => ({ ...prev, [key]: false })))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedType, effectiveFlap, params.oat, rtow, factor])
+  }, [selectedType, effectiveFlap, activeOat, activeElev, activeRwy, activeWeight, factor])
 
   // Revoke old blob URLs on unmount
   useEffect(() => {
@@ -636,10 +681,23 @@ function AfmChartTab({ params, chartData }: { params: ChartModalParams; chartDat
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Download the current chart image
+  const handleDownload = () => {
+    if (!currentBlobUrl) return
+    const a = document.createElement('a')
+    a.href = currentBlobUrl
+    const detail = mode === 'forward' ? `RWY${activeRwy ?? ''}m` : `RTOW${activeWeight ?? ''}kg`
+    a.download = `AFM_${selectedType}_OAT${activeOat}C_flap${effectiveFlap}_${detail}.jpg`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+
   const currentKey      = imgKey(selectedType)
   const currentBlobUrl  = blobUrls[currentKey]
   const currentLoading  = loading[currentKey]
   const currentError    = errors[currentKey]
+
 
   return (
     <div className="space-y-4">
@@ -648,19 +706,99 @@ function AfmChartTab({ params, chartData }: { params: ChartModalParams; chartDat
         <div className="flex items-start gap-2">
           <Info size={13} className="mt-0.5 shrink-0 text-teal-500" />
           <div>
-            <span className="font-bold">AFM Nomograph Verification: </span>
-            The coloured lines drawn over the chart image trace the <strong>exact construction sequence</strong> from the
-            approved AFM:
-            ① Vertical from OAT to the airport pressure-altitude curve,
-            ② Horizontal to the reference line,
-            ③ Parallel to the weight family curves to the selected runway length,
-            ④ Vertical down to the take-off weight axis.
+            <span className="font-bold">AFM Nomograph — Construction Sequence: </span>
+            ① Vertical line from OAT on the temperature axis up to the pressure-altitude curve,
+            ② Horizontal transfer right to the reference line,
+            ③ Follow the weight-family curve upward (parallel to the printed curves, never crossing them),
+            ④ Horizontal line left from the runway-length axis to the curve intersection,
+            ⑤ Vertical drop down to read the take-off weight.
             {rtow != null && (
-              <> The endpoint confirms <strong>{Math.round(rtow).toLocaleString()} kg</strong>.</>
+              <> Confirmed RTOW: <strong>{Math.round(rtow).toLocaleString()} kg</strong>. The label on the chart also shows the required runway distance read from the axis.</>
             )}
           </div>
         </div>
       </div>
+
+      {/* Editable Chart Parameters Panel */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 items-end text-xs shadow-inner">
+        <div>
+          <label className="block font-bold text-slate-700 mb-1">Plotting Mode</label>
+          <div className="flex bg-slate-200 p-0.5 rounded-lg">
+            <button
+              onClick={() => setMode('forward')}
+              className={`flex-1 py-1.5 text-[10px] font-bold rounded-md transition ${
+                mode === 'forward' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              Runway → Weight
+            </button>
+            <button
+              onClick={() => setMode('reverse')}
+              className={`flex-1 py-1.5 text-[10px] font-bold rounded-md transition ${
+                mode === 'reverse' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              Weight → Runway
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="block font-bold text-slate-700 mb-1">OAT (°C)</label>
+          <input
+            type="number"
+            value={customOat}
+            onChange={(e) => setCustomOat(e.target.value)}
+            className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            placeholder="e.g. 15"
+          />
+        </div>
+
+        <div>
+          <label className="block font-bold text-slate-700 mb-1">Altitude (PA ft)</label>
+          <input
+            type="number"
+            value={customElev}
+            onChange={(e) => setCustomElev(e.target.value)}
+            className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            placeholder="e.g. 5000"
+          />
+        </div>
+
+        {mode === 'forward' ? (
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">Runway Length (meters)</label>
+            <input
+              type="number"
+              value={customRwy}
+              onChange={(e) => setCustomRwy(e.target.value)}
+              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
+              placeholder="e.g. 1500"
+            />
+          </div>
+        ) : (
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">Target Weight (kg)</label>
+            <input
+              type="number"
+              value={customWeight}
+              onChange={(e) => setCustomWeight(e.target.value)}
+              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
+              placeholder="e.g. 17500"
+            />
+          </div>
+        )}
+
+        <div className="sm:col-span-2 md:col-span-1">
+          <button
+            onClick={handleResetParams}
+            className="w-full bg-slate-100 border border-slate-200 hover:bg-slate-200 text-slate-700 font-semibold py-1.5 px-3 rounded-lg transition text-[11px]"
+          >
+            Reset parameters
+          </button>
+        </div>
+      </div>
+
 
       {/* Type selector: TODA / ASDA */}
       <div className="flex items-center gap-2">
@@ -680,7 +818,7 @@ function AfmChartTab({ params, chartData }: { params: ChartModalParams; chartDat
             </button>
           ))}
         </div>
-        {/* Zoom controls */}
+        {/* Zoom controls + Download */}
         <div className="flex gap-1 ml-auto">
           <button
             onClick={() => setZoom(z => Math.min(3, z + 0.25))}
@@ -702,6 +840,14 @@ function AfmChartTab({ params, chartData }: { params: ChartModalParams; chartDat
             title="Reset zoom"
           >
             <RotateCcw size={13} />
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={!currentBlobUrl}
+            className="p-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition text-white"
+            title="Download chart image"
+          >
+            <Download size={13} />
           </button>
         </div>
       </div>

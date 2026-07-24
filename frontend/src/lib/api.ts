@@ -511,6 +511,8 @@ export const performanceChart = {
     oat:         number
     rtow_kg?:    number | null
     factor?:     string | null
+    rwy_m?:      number | null
+    pa_ft?:      number | null
   }) => {
     const q = new URLSearchParams({
       aircraft_id: params.aircraft_id,
@@ -520,6 +522,8 @@ export const performanceChart = {
       oat:         String(params.oat),
       ...(params.rtow_kg != null ? { rtow_kg: String(params.rtow_kg) } : {}),
       ...(params.factor          ? { factor:  params.factor }          : {}),
+      ...(params.rwy_m   != null ? { rwy_m:   String(params.rwy_m) }   : {}),
+      ...(params.pa_ft   != null ? { pa_ft:   String(params.pa_ft) }   : {}),
     })
     return `/api/performance/chart-image?${q.toString()}`
   },
