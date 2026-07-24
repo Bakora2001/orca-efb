@@ -60,12 +60,44 @@ export async function buildNavlog(aircraftId, waypoints) {
       resolved.push({ ...r.rows[0], kind: 'airport', id: wp.id })
 
     } else if (wp.kind === 'fix') {
-      const r = await query(
-        'SELECT ident, lat, lon FROM navpoints WHERE id = $1',
-        [wp.id]
-      )
-      if (r.rows.length === 0) throw new AppError(`Fix ${wp.id} not found`, 404)
-      resolved.push({ ...r.rows[0], kind: 'fix', id: wp.id })
+      // Airways-based auto-suggest uses 'ident:<IDENT>' as a placeholder ID
+      const isIdentRef = typeof wp.id === 'string' && wp.id.startsWith('ident:')
+      if (isIdentRef) {
+        const ident = wp.id.slice(6).toUpperCase()
+        // Try to find a matching navpoint by ident (pick the first match)
+        const r = await query(
+          `SELECT ident, lat, lon FROM navpoints
+           WHERE UPPER(ident) = $1 AND validation_status != 'DEPRECATED'
+           ORDER BY point_type ASC LIMIT 1`,
+          [ident]
+        )
+        if (r.rows.length > 0) {
+          resolved.push({ ...r.rows[0], kind: 'fix', id: wp.id })
+        } else {
+          // Not in navpoints — use the coordinates that came from the airways table
+          // (the frontend stored them on the WaypointEntry, but navlog only sends id/kind)
+          // In this edge case, just skip the waypoint gracefully
+          console.warn(`Airways fix ${ident} not found in navpoints — skipping`)
+        }
+      } else {
+        // Standard UUID lookup — first try navpoints, then airports as fallback
+        const r = await query(
+          'SELECT ident, lat, lon FROM navpoints WHERE id = $1',
+          [wp.id]
+        )
+        if (r.rows.length > 0) {
+          resolved.push({ ...r.rows[0], kind: 'fix', id: wp.id })
+        } else {
+          // Fallback: maybe this ID actually belongs to an airport (user searched
+          // and selected an airport from the fix search bar — treat it as airport)
+          const r2 = await query(
+            'SELECT icao_code AS ident, lat, lon FROM airports WHERE id = $1',
+            [wp.id]
+          )
+          if (r2.rows.length === 0) throw new AppError(`Waypoint ${wp.id} not found in navpoints or airports`, 404)
+          resolved.push({ ...r2.rows[0], kind: 'airport', id: wp.id })
+        }
+      }
 
     } else {
       throw new AppError(`Unknown waypoint kind: ${wp.kind}. Use "airport" or "fix"`, 400)

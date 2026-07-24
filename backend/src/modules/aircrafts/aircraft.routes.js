@@ -2,7 +2,7 @@ import { Router } from 'express'
 import * as controller from './aircraft.controller.js'
 import { validate } from '../../middleware/validate.js'
 import { authenticate, authorize } from '../../middleware/auth.js'
-import { createAircraftSchema, updateAircraftSchema } from './aircraft.validation.js'
+import { createAircraftSchema, updateAircraftSchema, bulkCreateAircraftSchema } from './aircraft.validation.js'
 
 const router = Router()
 
@@ -18,6 +18,9 @@ router.get('/:id', controller.getOne)
 
 // GET /api/aircraft/:id/performance — WAT/TODA/ASDA summary for this aircraft
 router.get('/:id/performance', controller.performanceSummary)
+
+// POST /api/aircraft/bulk        — bulk create (admin only)
+router.post('/bulk', authorize('admin'), validate(bulkCreateAircraftSchema), controller.bulkCreate)
 
 // POST /api/aircraft             — create (admin only)
 router.post('/', authorize('admin'), validate(createAircraftSchema), controller.create)

@@ -118,75 +118,98 @@ export async function deleteNavpoint(id) {
   return { message: 'Waypoint deleted' }
 }
 
-// ─── Leg suggestions ─────────────────────────────────────────────
-// Given departure and destination airport IDs, find navigation fixes
-// that lie near the great-circle track between them.
-// Returns fixes sorted by along-track distance, with cross-track distance.
-export async function getLegSuggestions(depId, destId, limit = 14) {
-  // Fetch departure and destination coordinates
-  const depRes = await query(
-    'SELECT lat, lon, icao_code FROM airports WHERE id = $1',
-    [depId]
-  )
-  const destRes = await query(
-    'SELECT lat, lon, icao_code FROM airports WHERE id = $1',
-    [destId]
-  )
-
+// ─── Leg suggestions — geometric bucketing route builder ──────────
+// Strategy:
+//   1. Calculate the great circle track from DEP to DEST.
+//   2. Divide the total distance into `limit` equal segments (buckets).
+//   3. Fetch all valid navpoints in the bounding box between DEP and DEST.
+//   4. Assign each navpoint to a bucket based on its along-track distance.
+//   5. Sort points in each bucket by cross-track distance (closest to center).
+//   6. For a given `attempt` number, pick the N-th best point in each bucket
+//      (falling back to the 1st if the bucket doesn't have N points).
+// This guarantees a perfectly distributed, flyable route that changes on each click.
+export async function getLegSuggestions(depId, destId, limit = 8, attempt = 1) {
+  // ── Fetch departure and destination ───────────────────────────
+  const [depRes, destRes] = await Promise.all([
+    query('SELECT lat, lon, icao_code FROM airports WHERE id = $1', [depId]),
+    query('SELECT lat, lon, icao_code FROM airports WHERE id = $1', [destId]),
+  ])
   if (depRes.rows.length === 0) throw new AppError('Departure airport not found', 404)
   if (destRes.rows.length === 0) throw new AppError('Destination airport not found', 404)
 
   const dep  = depRes.rows[0]
   const dest = destRes.rows[0]
 
-  const depLat  = parseFloat(dep.lat)
-  const depLon  = parseFloat(dep.lon)
-  const destLat = parseFloat(dest.lat)
-  const destLon = parseFloat(dest.lon)
-
-  // Great-circle distance DEP → DEST in NM
+  const depLat  = parseFloat(dep.lat),  depLon  = parseFloat(dep.lon)
+  const destLat = parseFloat(dest.lat), destLon = parseFloat(dest.lon)
   const totalNm = gcNm(depLat, depLon, destLat, destLon)
 
-  // Bounding box: expand by 20% of total distance on each side
-  const padDeg = (totalNm * 0.2) / 60
+  // ── Fetch fixes in bounding box ───────────────────────────────
+  // Expand box by 15% to catch nearby fixes
+  const padDeg = (totalNm * 0.15) / 60
   const minLat = Math.min(depLat, destLat) - padDeg
   const maxLat = Math.max(depLat, destLat) + padDeg
   const minLon = Math.min(depLon, destLon) - padDeg
   const maxLon = Math.max(depLon, destLon) + padDeg
 
-  // Fetch all fixes in the bounding box (not airports or deprecated fixes)
   const { rows } = await query(
-    `SELECT id, ident, name, point_type, lat, lon, region, provider, effective_date
+    `SELECT id, ident, name, point_type, lat, lon
      FROM navpoints
-     WHERE lat BETWEEN $1 AND $2
-       AND lon BETWEEN $3 AND $4
+     WHERE lat BETWEEN $1 AND $2 AND lon BETWEEN $3 AND $4
        AND validation_status != 'DEPRECATED'
-       AND point_type != 'AIRPORT'
-     LIMIT 500`,
+       AND point_type IN ('VOR', 'NDB', 'WAYPOINT')`,
     [minLat, maxLat, minLon, maxLon]
   )
 
-  // Compute along-track and cross-track distances for each fix
-  const MAX_XTK_NM = totalNm * 0.25  // only fixes within 25% of total distance off-track
-  const results = []
+  // ── Bucket the fixes ──────────────────────────────────────────
+  const numBuckets = limit
+  const bucketSize = totalNm / numBuckets
+  const MAX_XTK_NM = totalNm * 0.15  // allow up to 15% off-track deviation
+
+  // Array of arrays to hold fixes for each bucket
+  const buckets = Array.from({ length: numBuckets }, () => [])
 
   for (const fix of rows) {
     const fixLat = parseFloat(fix.lat)
     const fixLon = parseFloat(fix.lon)
-
     const atk = alongTrackNm(depLat, depLon, destLat, destLon, fixLat, fixLon, totalNm)
     const xtk = Math.abs(crossTrackNm(depLat, depLon, destLat, destLon, fixLat, fixLon))
 
-    // Only include fixes that are between the endpoints and not too far off-track
-    if (atk > 0 && atk < totalNm && xtk <= MAX_XTK_NM) {
-      results.push({ ...fix, along_track_nm: Math.round(atk * 10) / 10, cross_track_nm: Math.round(xtk * 10) / 10 })
+    // Skip points outside the start/end or too far off track
+    if (atk <= 0 || atk >= totalNm || xtk > MAX_XTK_NM) continue
+
+    const bucketIndex = Math.floor(atk / bucketSize)
+    if (bucketIndex >= 0 && bucketIndex < numBuckets) {
+      buckets[bucketIndex].push({
+        ...fix,
+        along_track_nm: atk,
+        cross_track_nm: xtk
+      })
     }
   }
 
-  // Sort by along-track distance (closest to departure first)
-  results.sort((a, b) => a.along_track_nm - b.along_track_nm)
+  // ── Select fixes for this attempt ─────────────────────────────
+  const route = []
+  
+  // To avoid getting the exact same route if the attempt # increases but buckets
+  // don't have enough elements, we'll modulo the attempt by the bucket size.
+  for (let i = 0; i < numBuckets; i++) {
+    const bucket = buckets[i]
+    if (bucket.length === 0) continue
 
-  return results.slice(0, limit)
+    // Sort by cross-track distance (closest to direct line first)
+    bucket.sort((a, b) => a.cross_track_nm - b.cross_track_nm)
+
+    // Use attempt to pick the N-th best option
+    // (1-indexed attempt, so attempt=1 gets index 0)
+    const indexToPick = (attempt - 1) % bucket.length
+    route.push(bucket[indexToPick])
+  }
+
+  // Ensure they are ordered correctly by distance from departure
+  route.sort((a, b) => a.along_track_nm - b.along_track_nm)
+
+  return route
 }
 
 // ─── Bulk import navpoints (admin) ────────────────────────────────

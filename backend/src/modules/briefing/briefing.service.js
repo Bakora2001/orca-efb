@@ -86,22 +86,16 @@ export async function generateOFP({
   const chunks = []
   doc.on('data', chunk => chunks.push(chunk))
 
-  // ── Page 1: Header + Flight ID + Weights + Fuel ──────────────
-  drawHeader(doc, config, depAp, destAp, dep_date, dep_time)
-  drawFlightBlock(doc, aircraft, depAp, destAp, altAp, alt2Ap, oat, payloadData)
+  // ── Build PDF ─────────────────────────────────────────────────
+  drawHeader(doc, config, dep_date, dep_time, aircraft)
+  drawFlightBlock(doc, aircraft, depAp, destAp, altAp, alt2Ap, oat, payloadData, dep_date, dep_time)
   drawWeightFuelTable(doc, payloadData)
-  doc.addPage()
-
-  // ── Page 2: Navlog ────────────────────────────────────────────
+  
   drawNavlog(doc, navlogData, payloadData)
-  doc.addPage()
-
-  // ── Page 3: Aerodrome Briefs ──────────────────────────────────
+  
   drawAerodromeBriefs(doc, [depAp, destAp, altAp, alt2Ap].filter(Boolean))
-
-  // ── Page 4: Weather (if requested) ───────────────────────────
+  
   if (include_weather && (depWx || destWx || altWx)) {
-    doc.addPage()
     drawWeatherSection(doc, [
       { label: `${depAp?.icao_code} DEP`, wx: depWx },
       { label: `${destAp?.icao_code} DEST`, wx: destWx },
@@ -119,262 +113,196 @@ export async function generateOFP({
 
 // ── Drawing functions ─────────────────────────────────────────────
 
-function drawHeader(doc, config, dep, dest, depDate, depTime) {
-  // Navy banner
-  doc.rect(36, 36, doc.page.width - 72, 48).fill(NAVY)
+function drawDivider(doc) {
+  doc.moveTo(36, doc.y).lineTo(doc.page.width - 36, doc.y).strokeColor('#dddddd').lineWidth(1).stroke()
+  doc.moveDown(0.5)
+  doc.fillColor('#000000') // reset
+}
 
-  doc.fillColor(BLUE).fontSize(18).font('Helvetica-Bold')
-    .text(config.company_name || 'ORCA AVIATION', 48, 46)
+function drawSectionTitle(doc, title) {
+  doc.fontSize(11).font('Helvetica-Bold').fillColor('#000000')
+    .text(title, 36, doc.y)
+  doc.moveDown(0.5)
+}
 
-  doc.fillColor(WHITE).fontSize(10).font('Helvetica')
-    .text('OPERATIONAL FLIGHT PLAN', 48, 66)
+function drawHeader(doc, config, depDate, depTime, ac) {
+  doc.fillColor('#000000').fontSize(14).font('Helvetica-Bold')
+    .text(`${config.company_name || 'Orca Aviation'} — Operational Flight Plan`, 36, 36)
 
-  // Right side: route + date
-  const route = `${dep?.icao_code ?? '????'} → ${dest?.icao_code ?? '????'}`
   const dateStr = depDate
     ? `${depDate}${depTime ? ' ' + depTime + 'Z' : ''}`
     : new Date().toISOString().slice(0, 16).replace('T', ' ') + 'Z'
+    
+  const acStr = ac ? `${ac.registration} (${ac.type})` : 'Unknown Aircraft'
 
-  doc.fillColor(SKY).fontSize(14).font('Helvetica-Bold')
-    .text(route, 300, 46, { align: 'right', width: doc.page.width - 350 })
-
-  doc.fillColor(LGREY).fontSize(9).font('Helvetica')
-    .text(dateStr, 300, 66, { align: 'right', width: doc.page.width - 350 })
-
-  doc.fillColor(NAVY)
-  doc.y = 100
+  doc.fontSize(9).font('Helvetica')
+    .text(`Generated ${dateStr} · ${acStr}`, 36, 54)
+    
+  doc.y = 80
 }
 
-function drawFlightBlock(doc, ac, dep, dest, alt, alt2, oat, pd) {
-  doc.fontSize(9).font('Helvetica-Bold').fillColor(NAVY)
-    .text('FLIGHT INFORMATION', 36, doc.y + 8)
-  doc.moveTo(36, doc.y + 2).lineTo(doc.page.width - 36, doc.y + 2)
-    .strokeColor(BLUE).lineWidth(1).stroke()
-  doc.moveDown(0.5)
+function drawFlightBlock(doc, ac, dep, dest, alt, alt2, oat, pd, depDate, depTime) {
+  drawSectionTitle(doc, 'FLIGHT SUMMARY')
 
-  const col1 = 36, col2 = 200, col3 = 370
-  const row  = (label, val, x, y) => {
-    doc.fillColor(DGREY).font('Helvetica').fontSize(8).text(label, x, y)
-    doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(9).text(val || '—', x, y + 10)
+  const col1 = 36, col2 = 180
+  const row = (label, val) => {
+    doc.font('Helvetica').fontSize(9).text(label, col1, doc.y)
+    doc.font('Helvetica').text(val || '—', col2, doc.y - 10.5)
   }
 
-  const y0 = doc.y
-  row('AIRCRAFT REG', ac?.registration, col1, y0)
-  row('TYPE',         ac?.type,         col2, y0)
-  row('OAT (°C)',     String(oat),       col3, y0)
+  const route = `${dep?.icao_code ?? '????'} -> ${dest?.icao_code ?? '????'}`
+  const acStr = ac ? `${ac.registration} (${ac.type})` : '—'
+  const dateStr = depDate || new Date().toISOString().slice(0, 10)
+  const timeStr = depTime ? `${depTime} UTC` : '—'
+  
+  const rtowStr = `${pd.rtow_kg.toLocaleString()} kg (${Math.round(pd.rtow_kg * 2.20462).toLocaleString()} lb) — ${pd.rtow_factor}`
+  const payloadStr = `${pd.payload_kg.toLocaleString()} kg » ${pd.pax} pax @ ${pd.pax_weight_kg} kg (limit: ${pd.payload_governing})`
+  const distStr = `${pd.trip_nm} nm`
 
-  const y1 = y0 + 26
-  row('DEP',  dep?.icao_code,  col1, y1)
-  row('DEST', dest?.icao_code, col2, y1)
-  row('ALT1', alt?.icao_code || 'NIL',  col3, y1)
+  row('Route', route)
+  row('Aircraft', acStr)
+  row('Flight date', dateStr)
+  row('Est. departure (ETD)', timeStr)
+  row('Departure OAT', `${oat} °C`)
+  row('RTOW', rtowStr)
+  row('Payload', payloadStr)
+  row('Trip distance', distStr)
 
-  const y2 = y1 + 26
-  row('DEP ELEVATION',  dep?.elevation_ft != null  ? `${dep.elevation_ft}ft`  : '—', col1, y2)
-  row('DEST ELEVATION', dest?.elevation_ft != null ? `${dest.elevation_ft}ft` : '—', col2, y2)
-  row('ALT2', alt2?.icao_code || 'NIL', col3, y2)
-
-  doc.y = y2 + 36
+  doc.y += 15
+  drawDivider(doc)
 }
 
 function drawWeightFuelTable(doc, pd) {
-  doc.fontSize(9).font('Helvetica-Bold').fillColor(NAVY)
-    .text('WEIGHTS & FUEL', 36, doc.y)
-  doc.moveTo(36, doc.y + 2).lineTo(doc.page.width - 36, doc.y + 2)
-    .strokeColor(BLUE).lineWidth(1).stroke()
-  doc.moveDown(0.5)
+  drawSectionTitle(doc, 'FUEL PLAN (lb)')
 
-  // Two-column weight + fuel layout
-  const half = (doc.page.width - 72) / 2
-  const x1 = 36, x2 = 36 + half + 12
-
-  // Weight column
-  const wRows = [
-    ['RTOW', `${pd.rtow_kg.toLocaleString()} kg`, pd.rtow_factor === 'STRUCT' ? AMBER : GREEN],
-    ['TOW',  `${pd.tow_kg.toLocaleString()} kg`,  NAVY],
-    ['LW',   `${pd.ldw_kg.toLocaleString()} kg`,  pd.lw_limit_ok ? NAVY : '#ff3d57'],
-    ['ZFW',  `${pd.zfw_kg.toLocaleString()} kg`,  NAVY],
-    ['PAYLOAD', `${pd.payload_kg.toLocaleString()} kg`, GREEN],
-    ['MAX PAX',  String(pd.pax), NAVY],
-  ]
-
-  // Fuel column
-  const fRows = [
-    ['TRIP FUEL',   `${pd.fuel.trip_lb.toLocaleString()} lb`],
-    ['ALT FUEL',    `${pd.fuel.alt_lb.toLocaleString()} lb`],
-    ['CONTINGENCY', `${pd.fuel.cont_lb.toLocaleString()} lb`],
-    ['RESERVE',     `${pd.fuel.reserve_lb.toLocaleString()} lb`],
-    ['EXTRA',       `${pd.fuel.extra_lb.toLocaleString()} lb`],
-    ['TOTAL',       `${pd.fuel.total_lb.toLocaleString()} lb  (${pd.fuel.total_kg.toLocaleString()} kg)`],
-  ]
-
-  let y = doc.y
-  wRows.forEach(([label, val, color], i) => {
-    const rowY = y + i * 16
-    if (i % 2 === 0) doc.rect(x1, rowY, half, 15).fill(LGREY)
-    doc.fillColor(DGREY).font('Helvetica').fontSize(8).text(label, x1 + 4, rowY + 4)
-    doc.fillColor(color).font('Helvetica-Bold').fontSize(8).text(val, x1 + 90, rowY + 4)
-  })
-
-  fRows.forEach(([label, val], i) => {
-    const rowY = y + i * 16
-    if (i % 2 === 0) doc.rect(x2, rowY, half, 15).fill(LGREY)
-    doc.fillColor(DGREY).font('Helvetica').fontSize(8).text(label, x2 + 4, rowY + 4)
-    doc.fillColor(i === 5 ? GREEN : NAVY).font('Helvetica-Bold').fontSize(8)
-      .text(val, x2 + 90, rowY + 4)
-  })
-
-  doc.y = y + wRows.length * 16 + 12
-
-  // Governing limit note
-  doc.fillColor(AMBER).font('Helvetica-Oblique').fontSize(8)
-    .text(`RTOW factor: ${pd.rtow_factor}  |  Payload limit: ${pd.payload_governing}`, 36, doc.y)
-
-  if (pd.field_limit_note) {
-    doc.fillColor(DGREY).fontSize(7).text(pd.field_limit_note, 36, doc.y + 10)
+  const col1 = 36, col2 = 180
+  const row = (label, val, bold = false) => {
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(9).text(label, col1, doc.y)
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').text(val, col2, doc.y - 10.5)
   }
 
-  doc.y = doc.y + 24
+  row('Trip', pd.fuel.trip_lb.toLocaleString())
+  row('Alternate', pd.fuel.alt_lb.toLocaleString())
+  row('Contingency', pd.fuel.cont_lb.toLocaleString())
+  row('Final reserve', pd.fuel.reserve_lb.toLocaleString())
+  row('Extra / tankering', pd.fuel.extra_lb.toLocaleString())
+  row('TOTAL', `${pd.fuel.total_lb.toLocaleString()}  (${pd.fuel.total_kg.toLocaleString()} kg)`, true)
+
+  doc.y += 15
+  drawDivider(doc)
 }
 
 function drawNavlog(doc, navlog, pd) {
-  // Page header
-  doc.rect(36, 36, doc.page.width - 72, 24).fill(NAVY)
-  doc.fillColor(WHITE).fontSize(11).font('Helvetica-Bold')
-    .text('NAVLOG', 48, 43)
-  doc.fillColor(SKY).fontSize(9).font('Helvetica')
-    .text(`${navlog.totals.dist_nm} NM  ·  ${navlog.totals.ete_hhmm} ETE  ·  ${navlog.totals.fuel_lb.toLocaleString()} lb`, 200, 44)
+  drawSectionTitle(doc, 'NAVLOG')
 
-  doc.y = 72
-
-  // Column headers
   const cols = [
-    { label: 'FROM',    x: 36,  w: 60  },
-    { label: 'TO',      x: 100, w: 60  },
-    { label: 'TRK°',   x: 164, w: 44  },
-    { label: 'DIST NM',x: 210, w: 60  },
-    { label: 'ETE',     x: 272, w: 50  },
-    { label: 'FUEL LB', x: 324, w: 70  },
-    { label: 'FUEL KG', x: 396, w: 70  },
+    { label: 'From',    x: 40,  w: 40  },
+    { label: 'To',      x: 80,  w: 40  },
+    { label: 'Airway',  x: 120, w: 50  },
+    { label: 'Track',   x: 170, w: 40  },
+    { label: 'Dist nm', x: 210, w: 50  },
+    { label: 'ETE',     x: 260, w: 40  },
+    { label: 'Fuel lb', x: 300, w: 50  },
   ]
 
-  doc.rect(36, doc.y, doc.page.width - 72, 14).fill(DARK_NAVY())
+  // Header row with light grey background
+  doc.rect(36, doc.y - 2, doc.page.width - 72, 14).fill('#f4f4f4')
+  doc.fillColor('#000000')
   cols.forEach(c => {
-    doc.fillColor(WHITE).font('Helvetica-Bold').fontSize(8)
-      .text(c.label, c.x, doc.y + 3, { width: c.w })
+    doc.font('Helvetica-Bold').fontSize(9).text(c.label, c.x, doc.y, { width: c.w })
   })
   doc.y += 14
 
-  let cumFuelLb = 0
-  navlog.legs.forEach((leg, i) => {
-    const rowY = doc.y
-    if (i % 2 === 0) doc.rect(36, rowY, doc.page.width - 72, 14).fill(LGREY)
-    cumFuelLb += leg.fuel_lb
+  // Legs
+  navlog.legs.forEach((leg, idx) => {
+    // Subtle alternating row color
+    if (idx % 2 === 1) {
+       doc.rect(36, doc.y, doc.page.width - 72, 12).fill('#fafafa')
+       doc.fillColor('#000000')
+    }
 
     const vals = [
       leg.from_ident,
       leg.to_ident,
+      'DCT',
       String(leg.track_deg) + '°',
       String(leg.dist_nm),
       leg.ete_hhmm,
       leg.fuel_lb.toLocaleString(),
-      leg.fuel_kg.toLocaleString(),
     ]
+    const rowY = doc.y + 1.5
     cols.forEach((c, ci) => {
-      doc.fillColor(NAVY).font(ci === 0 || ci === 1 ? 'Helvetica-Bold' : 'Helvetica')
-        .fontSize(8).text(vals[ci], c.x, rowY + 3, { width: c.w })
+      doc.font('Helvetica').fontSize(9).text(vals[ci], c.x, rowY, { width: c.w })
     })
-    doc.y += 14
+    doc.y += 12
   })
 
-  // Totals row
-  doc.rect(36, doc.y, doc.page.width - 72, 16).fill(NAVY)
-  doc.fillColor(WHITE).font('Helvetica-Bold').fontSize(8)
-    .text('TOTALS', 36, doc.y + 4)
-    .text(String(navlog.totals.dist_nm), 210, doc.y + 4)
-    .text(navlog.totals.ete_hhmm,        272, doc.y + 4)
-    .text(navlog.totals.fuel_lb.toLocaleString(), 324, doc.y + 4)
-    .text(navlog.totals.fuel_kg.toLocaleString(), 396, doc.y + 4)
+  // Totals row (with top border)
+  doc.moveTo(36, doc.y).lineTo(doc.page.width - 36, doc.y).strokeColor('#cccccc').lineWidth(1).stroke()
+  doc.fillColor('#000000')
+  doc.y += 3
+  
+  const tRowY = doc.y
+  doc.font('Helvetica-Bold').fontSize(9).text('TOTAL', cols[0].x, tRowY, { width: cols[0].w })
+  doc.text(String(navlog.totals.dist_nm), cols[4].x, tRowY, { width: cols[4].w })
+  doc.text(navlog.totals.ete_hhmm, cols[5].x, tRowY, { width: cols[5].w })
+  doc.text(navlog.totals.fuel_lb.toLocaleString(), cols[6].x, tRowY, { width: cols[6].w })
+  doc.y += 16
+  
+  doc.font('Helvetica').fontSize(8).fillColor('#888888')
+    .text("Airway 'DCT' = direct great-circle leg. Named airways require licensed nav data; enter manually where known.", 36, doc.y)
+    
   doc.y += 20
+  doc.fillColor('#000000')
+  drawDivider(doc)
 }
 
 function drawAerodromeBriefs(doc, airports) {
-  doc.rect(36, 36, doc.page.width - 72, 24).fill(NAVY)
-  doc.fillColor(WHITE).fontSize(11).font('Helvetica-Bold')
-    .text('AERODROME BRIEFS', 48, 43)
-  doc.y = 72
+  drawSectionTitle(doc, 'AERODROMES')
 
-  airports.forEach(ap => {
+  airports.forEach((ap, idx) => {
     if (!ap) return
-    doc.fillColor(BLUE).font('Helvetica-Bold').fontSize(10)
-      .text(`${ap.icao_code} — ${ap.name}`, 36, doc.y)
-    doc.moveDown(0.2)
-
-    const details = [
-      ['CITY',      ap.city      || '—'],
-      ['COUNTRY',   ap.country   || '—'],
-      ['ELEVATION', ap.elevation_ft != null ? `${ap.elevation_ft} ft` : '—'],
-      ['RUNWAY',    ap.rwy_m     ? `${ap.rwy_m} m` : '—'],
-      ['RWY DESC',  ap.rwy_desc  || '—'],
-      ['SURFACE',   ap.surface   || '—'],
-      ['FUEL',      ap.fuel      || '—'],
-      ['LAT / LON', ap.lat && ap.lon ? `${parseFloat(ap.lat).toFixed(4)}° / ${parseFloat(ap.lon).toFixed(4)}°` : '—'],
-    ]
-
-    const y0 = doc.y
-    const half = (doc.page.width - 72) / 2
-    details.forEach(([label, val], i) => {
-      const col = i < 4 ? 36 : 36 + half + 12
-      const row = i < 4 ? i : i - 4
-      const rowY = y0 + row * 16
-      doc.rect(col, rowY, half, 15).fill(i % 2 === 0 ? LGREY : WHITE)
-      doc.fillColor(DGREY).font('Helvetica').fontSize(8).text(label, col + 4, rowY + 4)
-      doc.fillColor(NAVY).font('Helvetica-Bold').fontSize(8).text(val, col + 80, rowY + 4)
-    })
-
-    doc.y = y0 + 4 * 16 + 4
-
-    if (ap.remarks) {
-      doc.fillColor(DGREY).font('Helvetica-Oblique').fontSize(7)
-        .text(`REMARKS: ${ap.remarks}`, 36, doc.y, { width: doc.page.width - 72 })
-      doc.moveDown(0.3)
-    }
-    if (ap.notam_notes) {
-      doc.fillColor('#cc6600').font('Helvetica-Oblique').fontSize(7)
-        .text(`NOTAM: ${ap.notam_notes}`, 36, doc.y, { width: doc.page.width - 72 })
-      doc.moveDown(0.3)
-    }
-
-    doc.moveDown(0.8)
+    const type = idx === 0 ? 'DEP' : idx === 1 ? 'DEST' : 'ALT'
+    
+    // Bold ICAO and light text
+    doc.font('Helvetica-Bold').fontSize(9).text(`${type}: ${ap.name || 'Unknown Airport'} (${ap.icao_code})`, 36, doc.y, { continued: true })
+    doc.font('Helvetica').text(` — Elev ${ap.elevation_ft != null ? ap.elevation_ft : '—'} ft · Rwy ${ap.rwy_m || '—'} m ${ap.surface || ''} [AIP]`)
+    
+    doc.y += 6
   })
+  
+  doc.y += 10
+  drawDivider(doc)
 }
 
 function drawWeatherSection(doc, items) {
-  doc.rect(36, 36, doc.page.width - 72, 24).fill(NAVY)
-  doc.fillColor(WHITE).fontSize(11).font('Helvetica-Bold')
-    .text('WEATHER', 48, 43)
-  doc.y = 72
+  drawSectionTitle(doc, 'WEATHER (METAR / TAF)')
 
   items.forEach(({ label, wx }) => {
     if (!wx) return
-    doc.fillColor(BLUE).font('Helvetica-Bold').fontSize(9)
-      .text(label, 36, doc.y)
-    doc.moveDown(0.2)
+    
+    const icao = label.split(' ')[0]
+    
+    doc.font('Helvetica-Bold').fontSize(9).text(icao, 36, doc.y)
+    doc.y += 10
 
     if (wx.metar) {
-      doc.fillColor(DGREY).font('Helvetica-Bold').fontSize(8).text('METAR', 36, doc.y)
-      doc.fillColor(NAVY).font('Courier').fontSize(8)
-        .text(wx.metar, 36, doc.y + 10, { width: doc.page.width - 72 })
-      doc.moveDown(0.5)
+      doc.font('Helvetica-Bold').fontSize(8).text('METAR: ', 36, doc.y, { continued: true })
+      doc.font('Helvetica').text(wx.metar)
+      doc.y += 4
     }
     if (wx.taf) {
-      doc.fillColor(DGREY).font('Helvetica-Bold').fontSize(8).text('TAF', 36, doc.y)
-      doc.fillColor(NAVY).font('Courier').fontSize(8)
-        .text(wx.taf, 36, doc.y + 10, { width: doc.page.width - 72 })
-      doc.moveDown(0.5)
+      doc.font('Helvetica-Bold').fontSize(8).text('TAF: ', 36, doc.y, { continued: true })
+      doc.font('Helvetica').text(wx.taf)
+      doc.y += 4
     }
 
-    doc.moveDown(0.6)
+    doc.y += 8
   })
+  
+  doc.y += 10
+  doc.font('Helvetica').fontSize(8).fillColor('#888888')
+    .text("Decision-support only. Verify all figures against current AIP, NOTAM, AFM and signed load sheet before flight", 36, doc.y, { align: 'center', width: doc.page.width - 72 })
 }
 
 // ── DB helpers ────────────────────────────────────────────────────

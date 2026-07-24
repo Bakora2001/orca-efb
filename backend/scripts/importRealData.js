@@ -9,7 +9,11 @@ const { Pool } = pg
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: parseInt(process.env.DB_PORT || '5432'),
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 })
 
@@ -23,15 +27,20 @@ async function importRealData() {
       if (fs.existsSync(p1)) return p1
       const p2 = path.resolve(__dirname, '../../../orca-efb-v14-main/orca-efb-v14-main', rel)
       if (fs.existsSync(p2)) return p2
-      return p1
+      const p3 = path.resolve(__dirname, '../data', path.basename(rel))
+      if (fs.existsSync(p3)) return p3
+      const p4 = path.resolve(__dirname, '../data')
+      if (fs.existsSync(p4) && !rel.endsWith('.csv')) return p4
+      return p3
     }
 
-    // 1. Import ALL airports
-    console.log('1️⃣ Importing ALL airports...')
+    // 1. Skip ALL airports
+    console.log('1️⃣ Skipping ALL airports...')
+    /*
     const airportsPath = getPath('data/airports_v14.csv')
     if (fs.existsSync(airportsPath)) {
       const csvContent = fs.readFileSync(airportsPath, 'utf-8')
-      const airports = parse(csvContent, { columns: true, skip_empty_lines: true, trim: true })
+      const airports = parse(csvContent, { columns: true, skip_empty_lines: true, trim: true, bom: true })
       
       let imported = 0
       for (const row of airports) { // ALL airports, not limited
@@ -71,11 +80,12 @@ async function importRealData() {
           imported++
           if (imported % 500 === 0) console.log(`   Processed ${imported} airports...`)
         } catch (err) {
-          // Continue on error
+          console.error(`Error on airport ${row.icao}:`, err.message)
         }
       }
       console.log(`✅ Imported ${imported} airports`)
     }
+    */
 
     // 2. Import navigation points from multiple AIP sources
     console.log('\n2️⃣ Importing navigation points from multiple AIPs...')
@@ -87,13 +97,18 @@ async function importRealData() {
       const filePath = path.join(dataDir, filename)
       try {
         const csvContent = fs.readFileSync(filePath, 'utf-8')
-        const navpoints = parse(csvContent, { columns: true, skip_empty_lines: true, trim: true })
+        const navpoints = parse(csvContent, { columns: true, skip_empty_lines: true, trim: true, bom: true })
         
         let imported = 0
         for (const row of navpoints) {
           try {
             const ident = (row.ident || '').trim().toUpperCase()
             if (!ident || !row.lat || !row.lon) continue
+
+            let pt = (row.point_type || 'WAYPOINT').toUpperCase()
+            if (pt === 'SIGNIFICANT_POINT' || pt === 'REP' || !['VOR', 'NDB', 'WAYPOINT', 'INTERSECTION', 'USER', 'AIRPORT'].includes(pt)) {
+              pt = 'WAYPOINT'
+            }
 
             await pool.query(
               `INSERT INTO navpoints (
@@ -106,17 +121,17 @@ async function importRealData() {
                 row.name || ident,
                 parseFloat(row.lat),
                 parseFloat(row.lon),
-                row.point_type || 'WAYPOINT',
+                pt,
                 row.region || null,
                 row.provider || filename.split('_')[0].toUpperCase(),
                 'IMPORTED',
-                row.validation_status || 'AIP_EXTRACTED',
+                'UNVERIFIED',
                 row.effective_date || null
               ]
             )
             imported++
           } catch (err) {
-            // Skip conflicts
+            console.error(`Error processing navpoint ${row.ident}:`, err.message)
           }
         }
         console.log(`   ✅ ${filename}: ${imported} navpoints`)
@@ -132,41 +147,36 @@ async function importRealData() {
     const airwaysPath = getPath('data/airway_segments.csv')
     if (fs.existsSync(airwaysPath)) {
       const csvContent = fs.readFileSync(airwaysPath, 'utf-8')
-      const airways = parse(csvContent, { columns: true, skip_empty_lines: true, trim: true })
+      const airways = parse(csvContent, { columns: true, skip_empty_lines: true, trim: true, bom: true })
       
       let imported = 0
       for (const row of airways) { // ALL airways
         try {
-          if (!row.route_name || !row.from_ident || !row.to_ident) continue
-
+          if (!row.route_id || !row.seq_no) continue
+          
           await pool.query(
-            `INSERT INTO airways (
-              route_name, seq, from_ident, to_ident,
-              from_lat, from_lon, to_lat, to_lon,
-              lower_limit, upper_limit, direction, region, provider, validation_status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            `INSERT INTO airway_segments (
+              route_id, seq_no, start_ident, end_ident, type, 
+              lower_limit_fl, upper_limit_fl, direction, region, provider, validation_status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT DO NOTHING`,
             [
-              row.route_name,
-              parseInt(row.seq) || 0,
-              row.from_ident,
-              row.to_ident,
-              parseFloat(row.from_lat),
-              parseFloat(row.from_lon),
-              parseFloat(row.to_lat),
-              parseFloat(row.to_lon),
-              row.lower_limit || null,
-              row.upper_limit || null,
+              row.route_id,
+              parseInt(row.seq_no),
+              row.start_ident,
+              row.end_ident,
+              row.type || 'BOTH',
+              parseInt(row.lower_limit_fl) || null,
+              parseInt(row.upper_limit_fl) || null,
               row.direction || null,
               row.region || null,
               row.provider || null,
-              row.validation_status || 'AIP_EXTRACTED'
+              'UNVERIFIED'
             ]
           )
           imported++
-          if (imported % 500 === 0) console.log(`   Processed ${imported} airways...`)
         } catch (err) {
-          // Skip conflicts
+          // Continue on error
         }
       }
       console.log(`✅ Imported ${imported} airway segments`)

@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plane, Plus, RefreshCw, AlertCircle, Loader2, ChevronRight, Settings2 } from 'lucide-react'
+import { Plane, Plus, RefreshCw, AlertCircle, Loader2, ChevronRight, Settings2, Trash2, Edit, Upload } from 'lucide-react'
 import Card from '../components/ui/Card'
 import { aircraft as aircraftApi, type ApiAircraft } from '../lib/api'
+import AircraftFormModal from '../components/fleet/AircraftFormModal'
+import BulkUploadModal from '../components/fleet/BulkUploadModal'
 
 const statusColors: Record<string, string> = {
   active:      'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -49,6 +51,10 @@ export default function FleetManagement() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<ApiAircraft | null>(null)
+  
+  const [showForm, setShowForm] = useState(false)
+  const [showBulkUpload, setShowBulkUpload] = useState(false)
+  const [editingAircraft, setEditingAircraft] = useState<ApiAircraft | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -67,6 +73,31 @@ export default function FleetManagement() {
 
   const active = fleet.filter((a) => a.is_active).length
   const total = fleet.length
+
+  const handleSaveAircraft = async (data: Partial<ApiAircraft>) => {
+    if (editingAircraft?.id) {
+      await aircraftApi.update(editingAircraft.id, data)
+    } else {
+      await aircraftApi.create(data)
+    }
+    await load()
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Are you sure you want to permanently delete this aircraft?')) return
+    try {
+      await aircraftApi.delete(id)
+      setSelected(null)
+      await load()
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete aircraft')
+    }
+  }
+
+  const handleBulkUpload = async (data: Partial<ApiAircraft>[]) => {
+    await aircraftApi.bulkImport(data)
+    await load()
+  }
 
   return (
     <div className="space-y-6">
@@ -87,7 +118,16 @@ export default function FleetManagement() {
             <RefreshCw size={13} />
             Refresh
           </button>
-          <button className="bg-primary hover:bg-[#1850E0] text-white font-semibold rounded-lg px-4 py-2 flex items-center gap-1.5 transition text-sm">
+          <button 
+            onClick={() => setShowBulkUpload(true)}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-textprimary border border-borderc rounded-lg hover:border-primary hover:text-primary transition"
+          >
+            <Upload size={14} /> Bulk Upload
+          </button>
+          <button 
+            onClick={() => { setEditingAircraft(null); setShowForm(true) }}
+            className="bg-primary hover:bg-[#1850E0] text-white font-semibold rounded-lg px-4 py-2 flex items-center gap-1.5 transition text-sm"
+          >
             <Plus size={15} /> Add Aircraft
           </button>
         </div>
@@ -212,14 +252,51 @@ export default function FleetManagement() {
               </div>
             )}
 
+            <div className="flex items-center gap-3 mt-6 pt-4 border-t border-borderc">
+              <button
+                onClick={() => handleDelete(selected.id)}
+                className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-danger bg-red-50 hover:bg-red-100 rounded-xl text-sm font-bold transition flex-1"
+              >
+                <Trash2 size={16} /> Delete
+              </button>
+              <button
+                onClick={() => {
+                  setEditingAircraft(selected)
+                  setSelected(null)
+                  setShowForm(true)
+                }}
+                className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-textprimary bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold transition flex-1"
+              >
+                <Edit size={16} /> Edit
+              </button>
+            </div>
+            
             <button
               onClick={() => setSelected(null)}
-              className="w-full mt-5 bg-primary text-white font-bold py-2.5 rounded-xl text-sm hover:bg-[#1850E0] transition"
+              className="w-full mt-3 bg-primary text-white font-bold py-2.5 rounded-xl text-sm hover:bg-[#1850E0] transition"
             >
               Close
             </button>
           </div>
         </div>
+      )}
+
+      {showForm && (
+        <AircraftFormModal
+          aircraft={editingAircraft}
+          onClose={() => {
+            setShowForm(false)
+            setEditingAircraft(null)
+          }}
+          onSave={handleSaveAircraft}
+        />
+      )}
+
+      {showBulkUpload && (
+        <BulkUploadModal
+          onClose={() => setShowBulkUpload(false)}
+          onUpload={handleBulkUpload}
+        />
       )}
     </div>
   )
